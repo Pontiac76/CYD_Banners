@@ -1,0 +1,6 @@
+# CYD Banners private config sample
+# Copy to data/config.txt for local flashing. Do not commit real secrets.
+
+service_token=replace-with-private-random-string
+update_source_1=http://example.invalid/cyd-banners
+update_source_2=http://192.0.2.10:8080/cyd-banners

@@ -1,0 +1,14 @@
+# CYD Banners baseline WiFi profiles sample
+# Copy to data/wifi.txt for local flashing. Do not commit real credentials.
+
+[phone]
+ssid=ExamplePhoneHotspot
+password=not-a-real-password
+
+[home]
+ssid=ExampleHomeLAN
+password=not-a-real-password
+
+[event-router]
+ssid=ExampleRetroRouter
+password=not-a-real-password

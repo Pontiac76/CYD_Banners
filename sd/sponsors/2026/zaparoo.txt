@@ -1,0 +1,12 @@
+1:Zaparoo
+2:Supported systems
+- MiSTer FPGA
+- MiSTeX
+- RePlayOS
+- Windows
+- Linux
+- SteamOS
+- Batocera
+- LibreELEC
+- Commodore 64 
+  (With TeensyRom)

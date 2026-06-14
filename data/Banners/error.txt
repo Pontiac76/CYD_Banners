@@ -1,0 +1,6 @@
+1:CYD Banners Error
+2:Local recovery screen
+
+The SD card or Banners content could not be read.
+
+If this appears at a show, box this unit and investigate later.
