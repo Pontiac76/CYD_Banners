@@ -3,6 +3,7 @@
 
 #include "app_state.h"
 #include "display_manager.h"
+#include "network_manager.h"
 #include "playlist_manager.h"
 #include "touch_manager.h"
 
@@ -34,6 +35,7 @@ void setup()
   Serial.print("LittleFS: "); Serial.println(littlefsOk ? "OK" : "FAIL");
   Serial.print("SD: "); Serial.println(sdOk ? "OK" : "FAIL");
 
+  networkBegin();
   rebuildPlaylist();
   if (slideCount > 0) advanceSlide(true); else renderCurrentSlide();
 }
@@ -42,6 +44,7 @@ void loop()
 {
   unsigned long nowMs = millis();
   handleTouch();
+  networkUpdate();
 
   if (infoScreenVisible && nowMs - infoScreenEnteredMs >= INFO_SCREEN_TIMEOUT_MS)
   {

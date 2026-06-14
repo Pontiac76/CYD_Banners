@@ -1,6 +1,7 @@
 #include "display_manager.h"
 
 #include "app_state.h"
+#include "network_manager.h"
 #include <qrcode.h>
 
 void drawInfoLine(const String &label, const String &value, int y, uint16_t valueColor)
@@ -40,6 +41,9 @@ void drawInfoScreen()
   int y = 24;
   drawInfoLine("MAC", macAddressText(), y, TFT_WHITE); y += 13;
   drawInfoLine("IP", wifiIpText(), y, WiFi.status() == WL_CONNECTED ? TFT_GREEN : TFT_DARKGREY); y += 13;
+  drawInfoLine("WiFi", currentWifiSsidText(), y, networkStatusBarColor()); y += 13;
+  drawInfoLine("Net", networkStatusText, y, networkStatusBarColor()); y += 13;
+  drawInfoLine("Update", updateStatusText, y, networkHealth() == NetworkHealth::ConnectedGood ? TFT_GREEN : TFT_YELLOW); y += 13;
   drawInfoLine("LittleFS", littlefsOk ? "OK" : "FAIL", y, littlefsOk ? TFT_GREEN : TFT_RED); y += 13;
   bool sdMountedForInfo = sdOk && SD.begin(SD_CS_PIN);
   bool baseFound = sdMountedForInfo && SD.exists(PROJECT_ROOT);
@@ -48,6 +52,7 @@ void drawInfoScreen()
   digitalWrite(TOUCH_CS_PIN, HIGH);
 
   drawInfoLine("SD", sdOk ? "OK" : "FAIL", y, sdOk ? TFT_GREEN : TFT_RED); y += 13;
+  drawInfoLine("Free", sdFreeText(), y, sdOk ? TFT_CYAN : TFT_RED); y += 13;
   drawInfoLine("Base", baseFound ? "found" : "missing", y, baseFound ? TFT_GREEN : TFT_RED); y += 13;
   drawInfoLine("Root", rootFound ? "playlist.ini" : "missing", y, rootFound ? TFT_GREEN : TFT_RED); y += 13;
   drawInfoLine("Slides", String(slideCount), y, slideCount > 0 ? TFT_GREEN : TFT_RED); y += 13;
@@ -130,7 +135,7 @@ void drawTextSlide(const String &path)
   digitalWrite(TOUCH_CS_PIN, HIGH);
 }
 
-String readQrPayload(const String &path)
+bool readQrFile(const String &path, String &payload, String textLines[], int &textLineCount, int maxTextLines)
 {
   bool sdMountedForRender = false;
   if (!isLfsPath(path))
@@ -139,7 +144,7 @@ String readQrPayload(const String &path)
     if (!sdMountedForRender)
     {
       noteMissingFile(path);
-      return "";
+      return false;
     }
   }
 
@@ -151,7 +156,7 @@ String readQrPayload(const String &path)
     if (!lfsMountedForRender)
     {
       noteMissingFile(path);
-      return "";
+      return false;
     }
   }
 
@@ -161,34 +166,41 @@ String readQrPayload(const String &path)
     noteMissingFile(path);
     if (sdMountedForRender) SD.end();
     if (lfsMountedForRender) LittleFS.end();
-    return "";
+    return false;
   }
   noteFileExists(path);
 
+  payload = "";
+  textLineCount = 0;
+  bool gotPayload = false;
   while (file.available())
   {
     String line = file.readStringUntil('\n');
     line.replace("\r", "");
-    line.trim();
-    if (line != "" && !line.startsWith("#"))
+    if (!gotPayload)
     {
-      file.close();
-      if (sdMountedForRender) SD.end();
-      if (lfsMountedForRender) LittleFS.end();
-      digitalWrite(TOUCH_CS_PIN, HIGH);
-      return line;
+      line.trim();
+      if (line == "" || line.startsWith("#")) continue;
+      payload = line;
+      gotPayload = true;
+      continue;
     }
+    if (textLineCount < maxTextLines) textLines[textLineCount++] = line;
   }
   file.close();
   if (sdMountedForRender) SD.end();
   if (lfsMountedForRender) LittleFS.end();
   digitalWrite(TOUCH_CS_PIN, HIGH);
-  return "";
+  return payload != "";
 }
 
 void drawQrSlide(const String &path)
 {
-  String payload = readQrPayload(path);
+  constexpr int maxQrTextLines = 3;
+  String payload;
+  String textLines[maxQrTextLines];
+  int textLineCount = 0;
+  readQrFile(path, payload, textLines, textLineCount, maxQrTextLines);
   if (payload == "")
   {
     tft.fillScreen(TFT_BLACK);
@@ -224,18 +236,145 @@ void drawQrSlide(const String &path)
     }
   }
   tft.setTextDatum(TC_DATUM);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(payload, tft.width() / 2, tft.height() - 24, 2);
+  if (textLineCount > 0)
+  {
+    int textY = qrY + qrPixelSize + 4;
+    for (int i = 0; i < textLineCount && textY < tft.height() - 6; ++i)
+    {
+      String line = textLines[i];
+      int font = 2;
+      uint16_t color = TFT_LIGHTGREY;
+      if (i == 0)
+      {
+        font = 2;
+        color = TFT_WHITE;
+        if (line.startsWith("1:")) line = line.substring(2);
+      }
+      else if (i == 1)
+      {
+        font = 1;
+        color = color565(255, 255, 0);
+        if (line.startsWith("2:")) line = line.substring(2);
+      }
+      else
+      {
+        font = 1;
+        color = TFT_LIGHTGREY;
+      }
+      tft.setTextColor(color, TFT_BLACK);
+      tft.drawString(line, tft.width() / 2, textY, font);
+      textY += (font == 2) ? 18 : 11;
+    }
+  }
+  else
+  {
+    String shown = payload;
+    if (shown.length() > 38) shown = shown.substring(0, 35) + "...";
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(shown, tft.width() / 2, tft.height() - 24, 2);
+  }
 }
 
 void drawImagePlaceholder(const String &path)
 {
+  if (!fileExistsTracked(path))
+  {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("Missing image", tft.width() / 2, 80, 2);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.drawString(displayPath(path), tft.width() / 2, 108, 2);
+    return;
+  }
+
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("SD mount failed", tft.width() / 2, 80, 2);
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    return;
+  }
+
+  File file = SD.open(storagePath(path), FILE_READ);
+  if (!file)
+  {
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    noteMissingFile(path);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("Missing image", tft.width() / 2, 80, 2);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.drawString(displayPath(path), tft.width() / 2, 108, 2);
+    return;
+  }
+
+  char magic[8];
+  if (file.readBytes(magic, 8) != 8 || memcmp(magic, "CYDIMG1\0", 8) != 0)
+  {
+    file.close();
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    tft.drawString("Bad CYD image", tft.width() / 2, 80, 2);
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.drawString(displayPath(path), tft.width() / 2, 108, 2);
+    return;
+  }
+
+  uint8_t dims[4];
+  if (file.read(dims, 4) != 4)
+  {
+    file.close();
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    return;
+  }
+  uint16_t imageW = dims[0] | (uint16_t(dims[1]) << 8);
+  uint16_t imageH = dims[2] | (uint16_t(dims[3]) << 8);
+  int drawX = (tft.width() - imageW) / 2;
+  int drawY = (tft.height() - imageH) / 2;
+
   tft.fillScreen(TFT_BLACK);
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  tft.drawString("CYD image renderer pending", tft.width() / 2, 80, 2);
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString(displayPath(path), tft.width() / 2, 108, 2);
+  uint16_t *row = new uint16_t[imageW];
+  if (!row)
+  {
+    file.close();
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("Image row alloc failed", tft.width() / 2, 80, 2);
+    return;
+  }
+
+  bool oldSwap = tft.getSwapBytes();
+  tft.setSwapBytes(true);
+  for (uint16_t y = 0; y < imageH; ++y)
+  {
+    size_t wanted = size_t(imageW) * 2;
+    size_t got = file.read(reinterpret_cast<uint8_t *>(row), wanted);
+    if (got != wanted) break;
+    if (drawY + y >= 0 && drawY + y < tft.height())
+    {
+      tft.pushImage(drawX, drawY + y, imageW, 1, row);
+    }
+  }
+
+  tft.setSwapBytes(oldSwap);
+  delete[] row;
+  file.close();
+  SD.end();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  noteFileExists(path);
 }
 
 void drawUnsupportedImagePlaceholder(const String &path)
@@ -288,7 +427,7 @@ void drawStatusBar()
   unsigned long elapsed = infoScreenVisible ? millis() - infoScreenEnteredMs : millis() - slideStartedMs;
   unsigned long period = infoScreenVisible ? INFO_SCREEN_TIMEOUT_MS : (currentSlideDurationMs > 0 ? currentSlideDurationMs : DEFAULT_SLIDE_MS);
   int barWidth = map(elapsed % period, 0, period - 1, 0, tft.width());
-  uint16_t barColor = sdOk ? TFT_GREEN : TFT_RED;
+  uint16_t barColor = networkStatusBarColor();
   uint16_t backgroundColor = color565(16, 16, 16);
   int y = tft.height() - barHeight;
 

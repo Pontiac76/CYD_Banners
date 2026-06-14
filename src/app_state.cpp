@@ -19,6 +19,8 @@ Slide slides[MAX_SLIDES];
 int slideCount = 0;
 String missingFiles[MAX_MISSING_FILES];
 int missingFileCount = 0;
+String requiredFiles[MAX_REQUIRED_FILES];
+int requiredFileCount = 0;
 
 uint16_t color565(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -54,7 +56,11 @@ String displayPath(const String &sdPath)
   String lower = sdPath;
   lower.toLowerCase();
   if (lower.startsWith("sd://") || lower.startsWith("lfs://")) return sdPath;
-  return String("SD://") + (sdPath.startsWith("/") ? sdPath.substring(1) : sdPath);
+  String path = sdPath.startsWith("/") ? sdPath.substring(1) : sdPath;
+  String pathLower = path;
+  pathLower.toLowerCase();
+  if (pathLower.startsWith("banners/")) path = String("banners/") + path.substring(8);
+  return String("SD://") + path;
 }
 
 String macAddressText()
@@ -70,6 +76,32 @@ String macAddressText()
 String wifiIpText()
 {
   return WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("not connected");
+}
+
+String formatBytes(uint64_t bytes)
+{
+  if (bytes >= 1024ULL * 1024ULL * 1024ULL) return String(double(bytes) / double(1024ULL * 1024ULL * 1024ULL), 2) + " GiB";
+  if (bytes >= 1024ULL * 1024ULL) return String(double(bytes) / double(1024ULL * 1024ULL), 1) + " MiB";
+  if (bytes >= 1024ULL) return String(double(bytes) / 1024.0, 1) + " KiB";
+  return String(bytes) + " B";
+}
+
+String sdFreeText()
+{
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    return "unavailable";
+  }
+
+  uint64_t total = SD.totalBytes();
+  uint64_t used = SD.usedBytes();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  if (total == 0) return "unknown";
+  uint64_t freeBytes = total > used ? total - used : 0;
+  return formatBytes(freeBytes) + " free / " + formatBytes(total);
 }
 
 void resetDynamicDrawState()
@@ -113,6 +145,15 @@ void noteMissingFile(const String &path)
   missingFiles[missingFileCount++] = path;
 }
 
+void noteRequiredFile(const String &path)
+{
+  for (int i = 0; i < requiredFileCount; ++i)
+  {
+    if (requiredFiles[i] == path) return;
+  }
+  if (requiredFileCount < MAX_REQUIRED_FILES) requiredFiles[requiredFileCount++] = path;
+}
+
 bool fileExistsTracked(const String &path)
 {
   String p = storagePath(path);
@@ -127,7 +168,10 @@ bool fileExistsTracked(const String &path)
   }
   else
   {
-    exists = sdOk && SD.exists(p);
+    bool mounted = SD.begin(SD_CS_PIN);
+    sdOk = mounted;
+    exists = mounted && SD.exists(p);
+    digitalWrite(TOUCH_CS_PIN, HIGH);
   }
 
   if (exists) noteFileExists(path); else noteMissingFile(path);

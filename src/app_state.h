@@ -22,8 +22,9 @@ constexpr unsigned long INFO_SCREEN_TIMEOUT_MS = 60000;
 constexpr int MAX_SLIDES = 48;
 constexpr int MAX_PLAYLIST_FILES = 16;
 constexpr int MAX_MISSING_FILES = 8;
-constexpr const char *PROJECT_ROOT = "/Banners";
-constexpr const char *ROOT_PLAYLIST = "/Banners/playlist.ini";
+constexpr int MAX_REQUIRED_FILES = 96;
+constexpr const char *PROJECT_ROOT = "/banners";
+constexpr const char *ROOT_PLAYLIST = "/banners/playlist.ini";
 
 struct Slide
 {
@@ -52,14 +53,18 @@ extern Slide slides[MAX_SLIDES];
 extern int slideCount;
 extern String missingFiles[MAX_MISSING_FILES];
 extern int missingFileCount;
+extern String requiredFiles[MAX_REQUIRED_FILES];
+extern int requiredFileCount;
 
 uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
 String displayPath(const String &sdPath);
 String macAddressText();
 String wifiIpText();
+String sdFreeText();
 void resetDynamicDrawState();
 void noteFileExists(const String &path);
 void noteMissingFile(const String &path);
 bool isLfsPath(const String &path);
 String storagePath(const String &path);
 bool fileExistsTracked(const String &path);
+void noteRequiredFile(const String &path);

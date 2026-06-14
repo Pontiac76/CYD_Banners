@@ -1,0 +1,8 @@
+[server]
+host=0.0.0.0
+port=8088
+base_path=/cyd-banners
+
+[paths]
+content_dir=server/content
+state_dir=server/state

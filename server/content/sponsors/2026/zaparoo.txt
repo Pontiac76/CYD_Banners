@@ -1,0 +1,11 @@
+1:Zaparoo
+2:Supported systems
+MiSTer FPGA -- MiSTeX -- RePlayOS -- Windows 
+Linux -- SteamOS -- Batocera -- LibreELEC
+Commodore 64 (With TeensyRom)
+2:Supported reasons to use:
+Tap an NFC card to launch a game in your library!
+Keep your favorite games at your finger tips!
+Get creative with how to interact with
+your retro and modern games!
+1:NOT for just Retro use!

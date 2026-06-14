@@ -148,15 +148,21 @@ void processPathEntry(String value, const String &baseDir)
   }
   else if (ext == ".txt")
   {
-    if (fileExistsTracked(path)) addSlide("TEXT", path, displayPath(path), durationMs);
+    noteRequiredFile(path);
+    fileExistsTracked(path);
+    addSlide("TEXT", path, displayPath(path), durationMs);
   }
   else if (ext == ".qr")
   {
-    if (fileExistsTracked(path)) addSlide("QR", path, displayPath(path), durationMs);
+    noteRequiredFile(path);
+    fileExistsTracked(path);
+    addSlide("QR", path, displayPath(path), durationMs);
   }
   else if (ext == ".cyd")
   {
-    if (fileExistsTracked(path)) addSlide("IMAGE", path, displayPath(path), durationMs);
+    noteRequiredFile(path);
+    fileExistsTracked(path);
+    addSlide("IMAGE", path, displayPath(path), durationMs);
   }
   else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp")
   {
@@ -227,6 +233,7 @@ void rebuildPlaylist()
 {
   slideCount = 0;
   parsedPlaylistCount = 0;
+  requiredFileCount = 0;
   currentSlideIndex = -1;
 
   sdOk = SD.begin(SD_CS_PIN);

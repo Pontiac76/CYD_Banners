@@ -5,6 +5,14 @@
 /data/wifi.txt
 /test
 /node_modules
+/.venv
+__pycache__/
+*.pyc
+/server/config.ini
+/server/state/*.json
+!/server/state/.gitkeep
+/server/content/manifest.txt
+/server/content/sum.txt
 /package.json
 /package-lock.json
 /temp
@@ -16,3 +24,4 @@ SOUL.md
 USER.md
 .DS_Store
 .vscode
+last-error.txt
