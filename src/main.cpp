@@ -38,9 +38,17 @@ void setup()
   Serial.println("BOOT: networkBegin starting");
   networkBegin();
   Serial.println("BOOT: networkBegin complete");
-  Serial.println("BOOT: rebuildPlaylist starting");
-  rebuildPlaylist();
-  Serial.println("BOOT: rebuildPlaylist complete");
+  Serial.println("BOOT: load cached playlist starting");
+  if (loadCachedPlaylist())
+  {
+    Serial.println("BOOT: cached playlist loaded");
+  }
+  else
+  {
+    Serial.println("BOOT: cached playlist unavailable; rebuilding");
+    rebuildPlaylist();
+    Serial.println("BOOT: rebuildPlaylist complete");
+  }
   Serial.println("BOOT: first render starting");
   if (slideCount > 0) advanceSlide(true); else renderCurrentSlide();
   Serial.println("BOOT: setup complete");

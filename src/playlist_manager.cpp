@@ -4,10 +4,14 @@
 #include "display_manager.h"
 #include "network_manager.h"
 
+constexpr const char *RUNTIME_PLAYLIST_CACHE = "/banners/runtime_playlist.cache";
 String parsedPlaylists[MAX_PLAYLIST_FILES];
 int parsedPlaylistCount = 0;
-String wildcardMatches[MAX_SLIDES];
-String wildcardSegments[10];
+constexpr int WILDCARD_BUFFER_DEPTH = 2;
+constexpr int MAX_WILDCARD_MATCHES = 64;
+String wildcardMatches[WILDCARD_BUFFER_DEPTH][MAX_WILDCARD_MATCHES];
+String wildcardSegments[WILDCARD_BUFFER_DEPTH][10];
+int wildcardExpansionDepth = 0;
 
 String dirnameOf(const String &path)
 {
@@ -175,9 +179,9 @@ void splitPathSegments(const String &path, String segments[], int &segmentCount,
   }
 }
 
-void insertSorted(String matches[], int &matchCount, const String &path)
+void insertSorted(String matches[], int &matchCount, int maxMatches, const String &path)
 {
-  if (matchCount >= MAX_SLIDES) return;
+  if (matchCount >= maxMatches) return;
   int insertAt = matchCount;
   while (insertAt > 0 && path < matches[insertAt - 1])
   {
@@ -188,7 +192,7 @@ void insertSorted(String matches[], int &matchCount, const String &path)
   ++matchCount;
 }
 
-void collectWildcardMatches(const String &currentDir, String segments[], int segmentIndex, int segmentCount, String matches[], int &matchCount)
+void collectWildcardMatches(const String &currentDir, String segments[], int segmentIndex, int segmentCount, String matches[], int &matchCount, int maxMatches)
 {
   if (segmentIndex >= segmentCount) return;
 
@@ -212,11 +216,11 @@ void collectWildcardMatches(const String &currentDir, String segments[], int seg
       String entryPath = currentDir == "/" ? String("/") + name : currentDir + "/" + name;
       if (lastSegment)
       {
-        if (!entry.isDirectory()) insertSorted(matches, matchCount, entryPath);
+        if (!entry.isDirectory()) insertSorted(matches, matchCount, maxMatches, entryPath);
       }
       else if (entry.isDirectory())
       {
-        collectWildcardMatches(entryPath, segments, segmentIndex + 1, segmentCount, matches, matchCount);
+        collectWildcardMatches(entryPath, segments, segmentIndex + 1, segmentCount, matches, matchCount, maxMatches);
       }
     }
     entry.close();
@@ -231,25 +235,26 @@ bool expandWildcardPath(const String &path, unsigned long durationMs, bool expli
   if (isLfsPath(path)) return false;
 
   constexpr int maxSegments = 10;
+  int bufferIndex = wildcardExpansionDepth % WILDCARD_BUFFER_DEPTH;
+  ++wildcardExpansionDepth;
+  String *matches = wildcardMatches[bufferIndex];
+  String *segments = wildcardSegments[bufferIndex];
   int segmentCount = 0;
-  splitPathSegments(path, wildcardSegments, segmentCount, maxSegments);
-  if (segmentCount == 0) return true;
+  splitPathSegments(path, segments, segmentCount, maxSegments);
+  if (segmentCount == 0)
+  {
+    --wildcardExpansionDepth;
+    return true;
+  }
 
   int matchCount = 0;
   if (manifestHasEntries())
   {
-    matchCount = collectManifestMatches(path, wildcardMatches, MAX_SLIDES);
-    if (matchCount > 0)
-    {
-      Serial.print("Wildcard playlist entry matched manifest ");
-      Serial.print(matchCount);
-      Serial.print(" file(s): ");
-      Serial.println(displayPath(path));
-    }
+    matchCount = collectManifestMatches(path, matches, MAX_WILDCARD_MATCHES);
   }
   if (matchCount == 0)
   {
-    collectWildcardMatches(path.startsWith("/") ? String("/") : String(PROJECT_ROOT), wildcardSegments, 0, segmentCount, wildcardMatches, matchCount);
+    collectWildcardMatches(path.startsWith("/") ? String("/") : String(PROJECT_ROOT), segments, 0, segmentCount, matches, matchCount, MAX_WILDCARD_MATCHES);
   }
 
   if (matchCount == 0)
@@ -258,21 +263,20 @@ bool expandWildcardPath(const String &path, unsigned long durationMs, bool expli
     Serial.print("Wildcard playlist entry matched no files: ");
     Serial.println(displayPath(path));
     noteMissingFile(path);
+    --wildcardExpansionDepth;
     return true;
   }
 
-  Serial.print("Wildcard playlist entry matched ");
-  Serial.print(matchCount);
-  Serial.print(" file(s): ");
-  Serial.println(displayPath(path));
   for (int i = 0; i < matchCount; ++i)
   {
     if (i == 0 || i % 5 == 0)
     {
-      drawWorkNotice("Adding wildcard matches", String(i + 1) + "/" + String(matchCount) + " " + displayPath(wildcardMatches[i]));
+      drawWorkNotice("Adding wildcard matches", String(i + 1) + "/" + String(matchCount) + " " + displayPath(matches[i]));
     }
-    processResolvedPath(wildcardMatches[i], durationMs, explicitDuration);
+    String matchPath = matches[i];
+    processResolvedPath(matchPath, durationMs, explicitDuration);
   }
+  --wildcardExpansionDepth;
   return true;
 }
 
@@ -345,6 +349,128 @@ void processPathEntry(String value, const String &baseDir)
   String path = joinPath(baseDir, value);
   if (hasWildcard(path) && expandWildcardPath(path, durationMs, explicitDuration)) return;
   processResolvedPath(path, durationMs, explicitDuration);
+}
+
+String fieldAt(const String &line, int fieldIndex)
+{
+  int start = 0;
+  for (int i = 0; i < fieldIndex; ++i)
+  {
+    start = line.indexOf('\t', start);
+    if (start < 0) return String("");
+    ++start;
+  }
+  int end = line.indexOf('\t', start);
+  return end < 0 ? line.substring(start) : line.substring(start, end);
+}
+
+bool writeCachedPlaylist()
+{
+  File file = SD.open(RUNTIME_PLAYLIST_CACHE, FILE_WRITE);
+  if (!file)
+  {
+    Serial.println("Runtime playlist cache write failed: open failed");
+    return false;
+  }
+  file.println("CYDPLAY1");
+  for (int i = 0; i < parsedPlaylistCount; ++i)
+  {
+    file.print("P\t");
+    file.println(parsedPlaylists[i]);
+  }
+  for (int i = 0; i < requiredFileCount; ++i)
+  {
+    file.print("R\t");
+    file.println(requiredFiles[i]);
+  }
+  for (int i = 0; i < slideCount; ++i)
+  {
+    file.print("S\t");
+    file.print(slides[i].type);
+    file.print('\t');
+    file.print(slides[i].durationMs);
+    file.print('\t');
+    file.print(slides[i].explicitDuration ? 1 : 0);
+    file.print('\t');
+    file.print(slides[i].pathOrPayload);
+    file.print('\t');
+    file.println(slides[i].displayPath);
+  }
+  file.close();
+  Serial.print("Runtime playlist cache written: slides ");
+  Serial.print(slideCount);
+  Serial.print(", required ");
+  Serial.print(requiredFileCount);
+  Serial.print(", playlists ");
+  Serial.println(parsedPlaylistCount);
+  return true;
+}
+
+bool loadCachedPlaylist()
+{
+  Serial.println("PLAYLIST: loading runtime cache");
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.println("PLAYLIST: cache load SD mount failed");
+    return false;
+  }
+  File file = SD.open(RUNTIME_PLAYLIST_CACHE, FILE_READ);
+  if (!file)
+  {
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.println("PLAYLIST: runtime cache missing");
+    return false;
+  }
+  String header = file.readStringUntil('\n');
+  header.replace("\r", "");
+  header.trim();
+  if (header != "CYDPLAY1")
+  {
+    file.close();
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.println("PLAYLIST: runtime cache bad header");
+    return false;
+  }
+
+  slideCount = 0;
+  parsedPlaylistCount = 0;
+  requiredFileCount = 0;
+  currentSlideIndex = -1;
+
+  while (file.available())
+  {
+    String line = file.readStringUntil('\n');
+    line.replace("\r", "");
+    if (line.length() < 2) continue;
+    String kind = fieldAt(line, 0);
+    if (kind == "P" && parsedPlaylistCount < MAX_PLAYLIST_FILES)
+    {
+      parsedPlaylists[parsedPlaylistCount++] = fieldAt(line, 1);
+    }
+    else if (kind == "R" && requiredFileCount < MAX_REQUIRED_FILES)
+    {
+      requiredFiles[requiredFileCount++] = fieldAt(line, 1);
+    }
+    else if (kind == "S" && slideCount < MAX_SLIDES)
+    {
+      slides[slideCount++] = {fieldAt(line, 1), fieldAt(line, 4), fieldAt(line, 5), static_cast<unsigned long>(fieldAt(line, 2).toInt()), fieldAt(line, 3).toInt() != 0};
+    }
+  }
+  file.close();
+  SD.end();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  Serial.print("PLAYLIST: runtime cache loaded slides ");
+  Serial.print(slideCount);
+  Serial.print(", required ");
+  Serial.print(requiredFileCount);
+  Serial.print(", playlists ");
+  Serial.println(parsedPlaylistCount);
+  return slideCount > 0;
 }
 
 void printRuntimePlaylist()
@@ -457,10 +583,12 @@ void rebuildPlaylist()
   Serial.println("PLAYLIST: parse root starting");
   parseRootPlaylistFile();
   Serial.println("PLAYLIST: parse root complete");
+  writeCachedPlaylist();
   SD.end();
 
   drawWorkNotice("Playlist ready", String(slideCount) + " slides");
   Serial.print("Runtime slides: ");
   Serial.println(slideCount);
-  printRuntimePlaylist();
+  // Keep printRuntimePlaylist() available for temporary debugging, but avoid
+  // dumping large playlists during normal operation.
 }

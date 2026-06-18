@@ -415,6 +415,21 @@ bool manifestContainsRelPath(const String &relPath)
   return false;
 }
 
+bool isTrackedMissingRelPath(const String &relPath)
+{
+  String wanted = String("/banners/") + relPath;
+  wanted.toLowerCase();
+  for (int i = 0; i < missingFileCount; ++i)
+  {
+    String tracked = missingFiles[i];
+    tracked.toLowerCase();
+    if (tracked.startsWith("sd://")) tracked = tracked.substring(5);
+    if (!tracked.startsWith("/")) tracked = String("/") + tracked;
+    if (tracked == wanted) return true;
+  }
+  return false;
+}
+
 bool internalManifestHasEntries()
 {
   return manifestEntryCount > 0;
@@ -668,7 +683,7 @@ void scanCleanupDir(const String &dirPath)
       entry.close();
       String rel = path;
       if (rel.startsWith("/banners/")) rel = rel.substring(9);
-      bool keepLocalIndex = rel == "manifest.txt" || rel == "sum.txt";
+      bool keepLocalIndex = rel == "manifest.txt" || rel == "sum.txt" || rel == "runtime_playlist.cache";
       bool tempFile = path.endsWith(".tmp") || path.indexOf("/tmp/") >= 0 || path.indexOf("/temp/") >= 0;
       if (!keepLocalIndex && (tempFile || !manifestContainsRelPath(rel))) queueCleanupPath(path);
     }
@@ -826,6 +841,11 @@ bool backgroundDownloadsPending()
   return backgroundDownloadIndex < backgroundDownloadCount;
 }
 
+bool cleanupDeletesPending()
+{
+  return cleanupDeleteIndex < cleanupDeleteCount;
+}
+
 void finishBackgroundQueueIfDone()
 {
   if (backgroundDownloadIndex < backgroundDownloadCount) return;
@@ -833,11 +853,15 @@ void finishBackgroundQueueIfDone()
   Serial.print(backgroundDownloadOkCount);
   Serial.print("/");
   Serial.println(backgroundDownloadCount);
-  if (backgroundDownloadOkCount == backgroundDownloadCount && lastRemoteSum.length() > 0)
+  if (lastRemoteSum.length() > 0)
   {
+    if (backgroundDownloadOkCount != backgroundDownloadCount)
+    {
+      Serial.println("Background downloads had failures; accepting current manifest/sum to avoid repeated full replans");
+    }
     if (lastRemoteManifestBody.length() > 0) writeLocalManifest(lastRemoteManifestBody);
     writeLocalSum(lastRemoteSum);
-    updateStatusText = "content current";
+    updateStatusText = backgroundDownloadOkCount == backgroundDownloadCount ? "content current" : "content current; bg failures";
   }
 }
 
@@ -929,6 +953,8 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
   if (!mounted)
   {
     Serial.println("Manifest planning skipped: SD mount failed");
+    manifestEntryCount = 0;
+    manifestEntriesComplete = false;
     digitalWrite(TOUCH_CS_PIN, HIGH);
     return false;
   }
@@ -993,25 +1019,31 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
         if (entryIndex >= 0) manifestEntries[entryIndex].same = true;
         continue;
       }
-      File manifestSameFile = SD.open(sdPath, FILE_READ);
-      if (!manifestSameFile && relPath.startsWith("Banners/")) manifestSameFile = SD.open(String("/banners/") + relPath.substring(8), FILE_READ);
-      if (!manifestSameFile && relPath.startsWith("banners/")) manifestSameFile = SD.open(String("/banners/") + relPath.substring(8), FILE_READ);
-      if (manifestSameFile && manifestSameFile.size() == expectedSize)
+      bool verifyActualFile = relPath == "playlist.ini" || isTrackedMissingRelPath(relPath);
+      if (verifyActualFile)
       {
-        manifestSameFile.close();
+        File manifestSameFile = SD.open(sdPath, FILE_READ);
+        if (!manifestSameFile && relPath.startsWith("Banners/")) manifestSameFile = SD.open(String("/banners/") + relPath.substring(8), FILE_READ);
+        if (!manifestSameFile && relPath.startsWith("banners/")) manifestSameFile = SD.open(String("/banners/") + relPath.substring(8), FILE_READ);
+        if (manifestSameFile && manifestSameFile.size() == expectedSize)
+        {
+          manifestSameFile.close();
+          ++sameCount;
+          ++manifestSameCount;
+          if (entryIndex >= 0) manifestEntries[entryIndex].same = true;
+          continue;
+        }
+        if (manifestSameFile) manifestSameFile.close();
+        Serial.print("PLAN priority local manifest claimed same but SD missing/size mismatch: SD://banners/");
+        Serial.println(relPath);
+      }
+      else
+      {
         ++sameCount;
         ++manifestSameCount;
         if (entryIndex >= 0) manifestEntries[entryIndex].same = true;
-        if (verbose)
-        {
-          Serial.print("PLAN priority manifest same: SD://banners/");
-          Serial.println(relPath);
-        }
         continue;
       }
-      if (manifestSameFile) manifestSameFile.close();
-      Serial.print("PLAN priority local manifest claimed same but SD missing/size mismatch: SD://banners/");
-      Serial.println(relPath);
     }
 
     if (!priorityPath)
@@ -1024,6 +1056,14 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
       }
       continue;
     }
+
+    ++changedCount;
+    if (verbose)
+    {
+      Serial.print("PLAN priority changed by manifest: SD://banners/");
+      Serial.println(relPath);
+    }
+    continue;
 
     File file = SD.open(sdPath, FILE_READ);
     if (!file && relPath.startsWith("Banners/"))
@@ -1061,11 +1101,6 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
     {
       ++sameCount;
       if (entryIndex >= 0) manifestEntries[entryIndex].same = true;
-      if (verbose)
-      {
-        Serial.print("PLAN same: SD://banners/");
-        Serial.println(relPath);
-      }
     }
     else
     {
@@ -1133,6 +1168,7 @@ void downloadPriorityChanges(const String &updateSource)
       if (downloadManifestFile(updateSource, manifestEntries[i].path, manifestEntries[i].size, manifestEntries[i].hash, true))
       {
         ++ok;
+        manifestEntries[i].same = true;
         if (isPlaylist) playlistDownloaded = true;
       }
     }
@@ -1144,11 +1180,6 @@ void downloadPriorityChanges(const String &updateSource)
       rebuildPlaylist();
       Serial.print("Priority required files: ");
       Serial.println(requiredFileCount);
-      for (int r = 0; r < requiredFileCount; ++r)
-      {
-        Serial.print("  REQUIRED ");
-        Serial.println(displayPath(requiredFiles[r]));
-      }
       mounted = SD.begin(SD_CS_PIN);
       sdOk = mounted;
       if (!mounted)
@@ -1205,22 +1236,29 @@ void fetchManifest(const String &updateSource, const String &remoteSum)
     updateStatusText = "manifest fetched";
     lastRemoteManifestBody = body;
     bool contentHealthy = reportManifestPlan(body, true);
+    if (!contentHealthy && manifestEntryCount == 0)
+    {
+      Serial.println("Manifest planning produced no entries; deferring update until next call-home");
+      updateStatusText = "manifest plan deferred";
+      if (infoScreenVisible) drawInfoScreen();
+      return;
+    }
     if (!contentHealthy)
     {
       downloadPriorityChanges(updateSource);
       Serial.println("Priority downloads finished; rebuilding runtime playlist before background downloads");
       rebuildPlaylist();
-      bool nowHealthy = reportManifestPlan(body, false);
       bool priorityHealthy = !priorityChangesPending();
       if (priorityHealthy && remoteSum.length() > 0)
       {
         queueBackgroundDownloads();
         writeLocalManifest(body);
         writeLocalSum(remoteSum);
-        updateStatusText = nowHealthy ? "content current" : "background downloads queued";
+        updateStatusText = backgroundDownloadsPending() ? "background downloads queued" : "content current";
       }
       else
       {
+        Serial.println("Priority changes remain after download attempt; leaving local sum unchanged");
         queueBackgroundDownloads();
       }
     }
@@ -1348,6 +1386,7 @@ void networkUpdate()
     processBackgroundDownload();
     bool stillHasBackgroundDownloads = backgroundDownloadsPending();
     if (!hadBackgroundDownloads && !stillHasBackgroundDownloads) processCleanupDelete();
+    bool cleanupStillPending = cleanupDeletesPending();
     String connectedSsid = WiFi.SSID();
     if (lastLoggedConnectedSsid != connectedSsid)
     {
@@ -1360,9 +1399,10 @@ void networkUpdate()
       lastLoggedConnectedSsid = connectedSsid;
     }
     networkStatusText = String("connected ") + (currentWifiProfile >= 0 && currentWifiProfile < wifiProfileCount ? wifiProfiles[currentWifiProfile].name : String("WiFi"));
-    if (hadBackgroundDownloads || stillHasBackgroundDownloads)
+    if (hadBackgroundDownloads || stillHasBackgroundDownloads || cleanupStillPending)
     {
       if (stillHasBackgroundDownloads) updateStatusText = "downloading background";
+      else if (cleanupStillPending) updateStatusText = "cleanup pending";
       return;
     }
     if (lastCallHomeMs == 0 || now - lastCallHomeMs >= CALL_HOME_INTERVAL_MS)

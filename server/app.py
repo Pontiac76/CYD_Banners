@@ -223,13 +223,21 @@ def analyze_content_status() -> dict[str, list[str]]:
                     warnings.append(f"LFS reference missing from project data directory: {rel} -> data/{lfs_rel}")
                 continue
             if any(ch in rel for ch in "*?"):
-                parent = resolved.parent if resolved else base_dir
-                pattern = resolved.name if resolved else Path(rel).name
-                matches = sorted(p for p in parent.glob(pattern) if p.is_file()) if parent.exists() else []
+                if resolved and resolved.is_absolute():
+                    try:
+                        glob_pattern = resolved.relative_to(base_dir).as_posix()
+                    except ValueError:
+                        glob_pattern = rel
+                else:
+                    glob_pattern = rel
+                matches = sorted(p for p in base_dir.glob(glob_pattern) if p.is_file())
                 if not matches:
                     warnings.append(f"Wildcard matched no files: {rel_playlist} -> {rel}")
                 for match in matches:
                     mark_ref(content_rel(match))
+                    if match.suffix.lower() in (".ini", ".play"):
+                        parse_playlist(match)
+                parent = resolved.parent if resolved else base_dir
                 if parent.exists() and parent.is_dir() and parent.name.lower() == "images" and not any(parent.iterdir()):
                     warnings.append(f"Empty image directory referenced: {content_rel(parent)}")
                 continue

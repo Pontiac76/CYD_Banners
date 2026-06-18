@@ -5,4 +5,5 @@
 extern String parsedPlaylists[];
 extern int parsedPlaylistCount;
 
+bool loadCachedPlaylist();
 void rebuildPlaylist();
