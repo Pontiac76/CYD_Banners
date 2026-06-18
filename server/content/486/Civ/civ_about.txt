@@ -1,0 +1,11 @@
+1:Civilization
+2:Build an Empire to Stand the Test of Time
+LD:Year:1991
+LD:Platform:DOS
+LD:Genre:Turn-Based Strategy
+LD:Theme:History, Empire Building
+LD:Publisher:MicroProse Software
+LD:Developer:MicroProse Software
+LD:Designer:Sid Meier, Bruce Shelley
+LD:Perspective:Top-Down
+LD:Mode:Single Player

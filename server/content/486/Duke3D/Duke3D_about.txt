@@ -1,0 +1,10 @@
+1:Duke Nukem 3D
+LD:Year:January 29, 1996
+LD:Platform:DOS
+LD:Genre:Action, First-Person Shooter
+LD:Theme:Sci-Fi, Comedy, Aliens
+LD:Publisher:FormGen, Inc.
+LD:Developer:3D Realms Entertainment
+LD:Engine:Build Engine
+LD:Perspective:First-Person
+LD:Mode:Single / Multiplayer

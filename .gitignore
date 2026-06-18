@@ -25,3 +25,5 @@ USER.md
 .DS_Store
 .vscode
 last-error.txt
+**/*.meta.json
+**/*.cyd

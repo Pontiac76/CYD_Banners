@@ -2,6 +2,7 @@
 
 #include "app_state.h"
 #include "display_manager.h"
+#include "network_manager.h"
 
 void handleTouch()
 {
@@ -9,6 +10,7 @@ void handleTouch()
   constexpr unsigned long TOUCH_LOCKOUT_AFTER_TOGGLE_MS = 500;
   constexpr unsigned long TOUCH_MIN_PRESS_MS = 40;
   constexpr unsigned long TOUCH_MAX_PRESS_MS = 5000;
+  constexpr unsigned long TOUCH_RESET_PRESS_MS = 8000;
 
   static bool pressCandidate = false;
   static unsigned long pressStartedMs = 0;
@@ -36,6 +38,17 @@ void handleTouch()
     if (pressCandidate)
     {
       lastPoint = touch.getPoint();
+      if (infoScreenVisible && nowMs - pressStartedMs >= TOUCH_RESET_PRESS_MS && nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
+      {
+        pressCandidate = false;
+        touchWasDown = true;
+        lastToggleMs = nowMs;
+        Serial.println("Touch long hold on info screen: reset local content state");
+        drawWorkNotice("Reset in progress", "clearing local manifest/sum");
+        resetLocalContentState();
+        infoScreenVisible = true;
+        infoScreenEnteredMs = nowMs;
+      }
     }
 
     touchWasDown = true;
@@ -49,7 +62,18 @@ void handleTouch()
     unsigned long pressDurationMs = nowMs - pressStartedMs;
     pressCandidate = false;
 
-    if (pressDurationMs >= TOUCH_MIN_PRESS_MS &&
+    if (infoScreenVisible && pressDurationMs >= TOUCH_RESET_PRESS_MS && nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
+    {
+      // Long-hold reset normally fires while the touch is still down. Keep this
+      // release path as a fallback in case the touch controller misses samples.
+      lastToggleMs = nowMs;
+      Serial.println("Touch long release on info screen: reset local content state");
+      drawWorkNotice("Reset in progress", "clearing local manifest/sum");
+      resetLocalContentState();
+      infoScreenVisible = true;
+      infoScreenEnteredMs = nowMs;
+    }
+    else if (pressDurationMs >= TOUCH_MIN_PRESS_MS &&
         pressDurationMs <= TOUCH_MAX_PRESS_MS &&
         nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
     {

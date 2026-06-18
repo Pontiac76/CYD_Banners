@@ -1,0 +1,9 @@
+1:Sea Rogue
+LD:Released:1992
+LD:Platform:DOS
+LD:Genre:Simulation, Adventure
+LD:Theme:Naval, Treasure Hunting
+LD:Publisher:MicroProse Software, Inc.
+LD:Developer:Software Sorcery
+LD:Perspective:Top-Down or Isometric
+LD:Mode:Single Player

@@ -1,0 +1,9 @@
+1:Eye of the Beholder
+LD:Released:1991
+LD:Platform:DOS
+LD:Genre:Role-Playing (RPG)
+LD:Theme:Fantasy, Dungeons & Dragons
+LD:Publisher:Strategic Simulations, Inc.
+LD:Developer:Westwood Associates
+LD:Perspective:First-Person
+LD:Mode:Single Player

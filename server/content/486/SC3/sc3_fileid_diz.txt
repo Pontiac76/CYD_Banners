@@ -1,0 +1,11 @@
+L1:Stellar Conquest III
+L2:file_id.diz
+LM2:Stellar Conquest III v1.04 <NB> - Space
+LM2:Strategy wargame, VGA/mouse required.
+LM2:286+ required. Design your own ships,
+LM2:and play a 2 to 4 player game (any of
+LM2:which can be human or computer). Select
+LM2:from plasma cannons, lasers, cloaking
+LM2:devices, torpedo launchers, and more
+LM2:to build your fleet to compete for
+LM2:resources and destroy your enemies!

@@ -1,0 +1,11 @@
+1:Nigel Mansell's
+2:World Championship Racing
+LD:Released:1993
+LD:Platform:DOS
+LD:Genre:Racing, Simulation
+LD:Theme:Formula One, Automobile
+LD:Publisher:Gremlin Graphics Software Limited
+LD: Gremlin Interactive Limited
+LD:Developer:Gremlin Graphics Software Limited
+LD:Perspective:Driver Seat
+LD:Mode:Single Player

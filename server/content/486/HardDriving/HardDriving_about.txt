@@ -1,0 +1,9 @@
+1:Hard Drivin'
+LD:Released:1990
+LD:Platform:DOS
+LD:Genre:Racing, Simulation
+LD:Theme:Automobile, Stunt Driving
+LD:Publisher:Domark Software, Inc.
+LD:Developer:Atari Games Corporation
+LD:Perspective:First-Person
+LD:Mode:Single Player

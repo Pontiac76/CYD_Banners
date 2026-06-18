@@ -1,0 +1,10 @@
+1:Stunt Driver
+LD:Released:1990
+LD:Platform:DOS
+LD:Genre:Racing, Simulation
+LD:Theme:Automobile, Stunt Driving
+LD:Publisher:Digital Integration Ltd.
+LD: Spectrum Holobyte, Inc.
+LD:Developer:Sphere, Inc.
+LD:Perspective:Driver Seat
+LD:Mode:Single Player

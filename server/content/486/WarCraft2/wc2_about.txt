@@ -1,0 +1,10 @@
+1:Warcraft II
+2:Tides of Darkness
+LD:Released:1995
+LD:Platform:DOS
+LD:Genre:Real-Time Strategy
+LD:Theme:Fantasy, War
+LD:Publisher:Blizzard Entertainment
+LD:Developer:Blizzard Entertainment
+LD:Perspective:Top-Down
+LD:Mode:Single / Multiplayer

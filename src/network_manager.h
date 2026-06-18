@@ -37,3 +37,6 @@ void networkUpdate();
 NetworkHealth networkHealth();
 uint16_t networkStatusBarColor();
 String currentWifiSsidText();
+bool manifestHasEntries();
+int collectManifestMatches(const String &sdPattern, String matches[], int maxMatches);
+bool resetLocalContentState();

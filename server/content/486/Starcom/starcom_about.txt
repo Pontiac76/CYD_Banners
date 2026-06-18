@@ -1,0 +1,10 @@
+1:Starcom
+LD:Released:1997
+LD:Platform:DOS
+LD:Genre:Action
+LD:Theme:Sci-Fi, Space
+LD:Publisher:Grey Software
+LD:Developer:Grey Software
+LD:Perspective:3rd-Person
+LD: Side view
+LD: Top-Down

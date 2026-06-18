@@ -1,0 +1,24 @@
+688|688|1:688 Attack Sub
+BTI|bti|1:BattleTech\n2:The Crescent Hawk's Inception
+Civ|civ|1:Civilization
+Doom|doom|1:Doom
+Doom2|doom2|1:Doom 2
+Duke|Duke|1:Duke Nukem
+Duke3D|Duke3D|1:Duke Nukem 3D
+EOB|eob|1:Eye of the Beholder
+HardDriving|HardDriving|1:Hard Driving
+Lambo_AC|lambo_ac|1:Lamborghini\n2:American Challenge
+MilleBorne|mb|1:Mille Borne
+NigelMansell|nmwc|1:Nigel Mansell's World Championship
+PQ1|pq1|1:Police Quest
+RRT|rrt|1:Rail Road Tycoon
+SC3|sc3|1:Stellar Conquest 3
+SeaRogue|searogue|1:Sea Rogue
+Starcom|starcom|1:Starcom
+Starcon2|starcon2|1:Starcon 2
+StuntDriver|sd|1:Stunt Driver
+Stunts|stunts|1:Stunts
+S-ZZT|szzt|1:Super ZZT
+Tyrian|tyrian|1:Tyrian
+WarCraft2|wc2|1:Warcraft 2
+Monopoly|mono|1:Monopoly\n2:By Parker Brothers

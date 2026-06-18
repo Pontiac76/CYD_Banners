@@ -1,9 +1,13 @@
 #include "playlist_manager.h"
 
 #include "app_state.h"
+#include "display_manager.h"
+#include "network_manager.h"
 
 String parsedPlaylists[MAX_PLAYLIST_FILES];
 int parsedPlaylistCount = 0;
+String wildcardMatches[MAX_SLIDES];
+String wildcardSegments[10];
 
 String dirnameOf(const String &path)
 {
@@ -55,10 +59,12 @@ String lowerExtension(const String &path)
   return ext;
 }
 
-unsigned long parseDurationMs(String &value)
+unsigned long parseDurationMs(String &value, bool &explicitDuration)
 {
+  explicitDuration = false;
   int pipe = value.lastIndexOf('|');
   if (pipe < 0) return DEFAULT_SLIDE_MS;
+  explicitDuration = true;
   String durationText = value.substring(pipe + 1);
   durationText.trim();
   value = value.substring(0, pipe);
@@ -92,14 +98,14 @@ bool readPlaylistPathLine(String line, String &value)
   return true;
 }
 
-bool addSlide(const String &type, const String &pathOrPayload, const String &displayPathText, unsigned long durationMs)
+bool addSlide(const String &type, const String &pathOrPayload, const String &displayPathText, unsigned long durationMs, bool explicitDuration)
 {
   if (slideCount >= MAX_SLIDES)
   {
     Serial.println("Slide list full; skipping item");
     return false;
   }
-  slides[slideCount++] = {type, pathOrPayload, displayPathText, durationMs};
+  slides[slideCount++] = {type, pathOrPayload, displayPathText, durationMs, explicitDuration};
   return true;
 }
 
@@ -114,9 +120,165 @@ bool alreadyParsedPlaylist(const String &path)
 }
 
 void processPathEntry(String value, const String &baseDir);
+void processResolvedPath(const String &path, unsigned long durationMs, bool explicitDuration);
+
+bool wildcardMatch(const char *pattern, const char *text)
+{
+  while (*pattern)
+  {
+    if (*pattern == '*')
+    {
+      while (*(pattern + 1) == '*') ++pattern;
+      if (*(pattern + 1) == '\0') return true;
+      for (const char *scan = text; *scan; ++scan)
+      {
+        if (wildcardMatch(pattern + 1, scan)) return true;
+      }
+      return wildcardMatch(pattern + 1, text);
+    }
+    if (*pattern == '?')
+    {
+      if (*text == '\0') return false;
+      ++pattern;
+      ++text;
+      continue;
+    }
+    if (*pattern != *text) return false;
+    ++pattern;
+    ++text;
+  }
+  return *text == '\0';
+}
+
+bool hasWildcard(const String &path)
+{
+  return path.indexOf('*') >= 0 || path.indexOf('?') >= 0;
+}
+
+String basenameOf(const String &path)
+{
+  int slash = path.lastIndexOf('/');
+  return slash >= 0 ? path.substring(slash + 1) : path;
+}
+
+void splitPathSegments(const String &path, String segments[], int &segmentCount, int maxSegments)
+{
+  segmentCount = 0;
+  int start = path.startsWith("/") ? 1 : 0;
+  while (start <= path.length() && segmentCount < maxSegments)
+  {
+    int slash = path.indexOf('/', start);
+    String segment = slash < 0 ? path.substring(start) : path.substring(start, slash);
+    if (segment != "") segments[segmentCount++] = segment;
+    if (slash < 0) break;
+    start = slash + 1;
+  }
+}
+
+void insertSorted(String matches[], int &matchCount, const String &path)
+{
+  if (matchCount >= MAX_SLIDES) return;
+  int insertAt = matchCount;
+  while (insertAt > 0 && path < matches[insertAt - 1])
+  {
+    matches[insertAt] = matches[insertAt - 1];
+    --insertAt;
+  }
+  matches[insertAt] = path;
+  ++matchCount;
+}
+
+void collectWildcardMatches(const String &currentDir, String segments[], int segmentIndex, int segmentCount, String matches[], int &matchCount)
+{
+  if (segmentIndex >= segmentCount) return;
+
+  String pattern = segments[segmentIndex];
+  bool lastSegment = segmentIndex == segmentCount - 1;
+  File dir = SD.open(currentDir, FILE_READ);
+  if (!dir || !dir.isDirectory())
+  {
+    if (dir) dir.close();
+    return;
+  }
+
+  while (true)
+  {
+    File entry = dir.openNextFile();
+    if (!entry) break;
+    String name = basenameOf(String(entry.name()));
+    bool nameMatches = wildcardMatch(pattern.c_str(), name.c_str());
+    if (nameMatches)
+    {
+      String entryPath = currentDir == "/" ? String("/") + name : currentDir + "/" + name;
+      if (lastSegment)
+      {
+        if (!entry.isDirectory()) insertSorted(matches, matchCount, entryPath);
+      }
+      else if (entry.isDirectory())
+      {
+        collectWildcardMatches(entryPath, segments, segmentIndex + 1, segmentCount, matches, matchCount);
+      }
+    }
+    entry.close();
+  }
+  dir.close();
+}
+
+bool expandWildcardPath(const String &path, unsigned long durationMs, bool explicitDuration)
+{
+  noteRequiredFile(path);
+  drawWorkNotice("Playlist wildcard", displayPath(path));
+  if (isLfsPath(path)) return false;
+
+  constexpr int maxSegments = 10;
+  int segmentCount = 0;
+  splitPathSegments(path, wildcardSegments, segmentCount, maxSegments);
+  if (segmentCount == 0) return true;
+
+  int matchCount = 0;
+  if (manifestHasEntries())
+  {
+    matchCount = collectManifestMatches(path, wildcardMatches, MAX_SLIDES);
+    if (matchCount > 0)
+    {
+      Serial.print("Wildcard playlist entry matched manifest ");
+      Serial.print(matchCount);
+      Serial.print(" file(s): ");
+      Serial.println(displayPath(path));
+    }
+  }
+  if (matchCount == 0)
+  {
+    collectWildcardMatches(path.startsWith("/") ? String("/") : String(PROJECT_ROOT), wildcardSegments, 0, segmentCount, wildcardMatches, matchCount);
+  }
+
+  if (matchCount == 0)
+  {
+    drawWorkNotice("No wildcard matches", displayPath(path));
+    Serial.print("Wildcard playlist entry matched no files: ");
+    Serial.println(displayPath(path));
+    noteMissingFile(path);
+    return true;
+  }
+
+  Serial.print("Wildcard playlist entry matched ");
+  Serial.print(matchCount);
+  Serial.print(" file(s): ");
+  Serial.println(displayPath(path));
+  for (int i = 0; i < matchCount; ++i)
+  {
+    if (i == 0 || i % 5 == 0)
+    {
+      drawWorkNotice("Adding wildcard matches", String(i + 1) + "/" + String(matchCount) + " " + displayPath(wildcardMatches[i]));
+    }
+    processResolvedPath(wildcardMatches[i], durationMs, explicitDuration);
+  }
+  return true;
+}
 
 void parsePlayFile(const String &path)
 {
+  drawWorkNotice("Reading playlist", displayPath(path));
   if (alreadyParsedPlaylist(path)) return;
   if (!fileExistsTracked(path)) return;
 
@@ -136,10 +298,8 @@ void parsePlayFile(const String &path)
   file.close();
 }
 
-void processPathEntry(String value, const String &baseDir)
+void processResolvedPath(const String &path, unsigned long durationMs, bool explicitDuration)
 {
-  unsigned long durationMs = parseDurationMs(value);
-  String path = joinPath(baseDir, value);
   String ext = lowerExtension(path);
 
   if (ext == ".play" || ext == ".ini")
@@ -150,31 +310,70 @@ void processPathEntry(String value, const String &baseDir)
   {
     noteRequiredFile(path);
     fileExistsTracked(path);
-    addSlide("TEXT", path, displayPath(path), durationMs);
+    addSlide("TEXT", path, displayPath(path), durationMs, explicitDuration);
   }
   else if (ext == ".qr")
   {
     noteRequiredFile(path);
     fileExistsTracked(path);
-    addSlide("QR", path, displayPath(path), durationMs);
+    addSlide("QR", path, displayPath(path), durationMs, explicitDuration);
   }
   else if (ext == ".cyd")
   {
     noteRequiredFile(path);
     fileExistsTracked(path);
-    addSlide("IMAGE", path, displayPath(path), durationMs);
+    addSlide("IMAGE", path, displayPath(path), durationMs, explicitDuration);
   }
   else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp")
   {
     Serial.print("Unsupported source image referenced, server conversion needed: ");
     Serial.println(displayPath(path));
     if (!fileExistsTracked(path)) return;
-    addSlide("UNSUPPORTED_IMAGE", path, displayPath(path), durationMs);
+    addSlide("UNSUPPORTED_IMAGE", path, displayPath(path), durationMs, explicitDuration);
   }
   else
   {
     Serial.print("Unknown playlist entry extension: ");
     Serial.println(displayPath(path));
+  }
+}
+
+void processPathEntry(String value, const String &baseDir)
+{
+  bool explicitDuration = false;
+  unsigned long durationMs = parseDurationMs(value, explicitDuration);
+  String path = joinPath(baseDir, value);
+  if (hasWildcard(path) && expandWildcardPath(path, durationMs, explicitDuration)) return;
+  processResolvedPath(path, durationMs, explicitDuration);
+}
+
+void printRuntimePlaylist()
+{
+  Serial.println("Runtime playlist:");
+  if (slideCount == 0)
+  {
+    Serial.println("  <none>");
+    return;
+  }
+
+  for (int i = 0; i < slideCount; ++i)
+  {
+    Serial.print("  ");
+    Serial.print(i + 1);
+    Serial.print(". ");
+    Serial.print(slides[i].type);
+    Serial.print(" ");
+    Serial.print(slides[i].displayPath);
+    Serial.print(" duration=");
+    if (!slides[i].explicitDuration)
+    {
+      Serial.println("(Default)");
+    }
+    else
+    {
+      Serial.print(slides[i].durationMs / 1000UL);
+      Serial.println("s");
+    }
   }
 }
 
@@ -231,12 +430,17 @@ void parseRootPlaylistFile()
 
 void rebuildPlaylist()
 {
+  Serial.println("PLAYLIST: rebuild start");
+  drawWorkNotice("Building playlist", "starting");
   slideCount = 0;
   parsedPlaylistCount = 0;
   requiredFileCount = 0;
   currentSlideIndex = -1;
 
+  Serial.println("PLAYLIST: mounting SD");
   sdOk = SD.begin(SD_CS_PIN);
+  Serial.print("PLAYLIST: SD mount ");
+  Serial.println(sdOk ? "ok" : "failed");
   if (!sdOk || !SD.exists(PROJECT_ROOT))
   {
     if (sdOk)
@@ -244,14 +448,19 @@ void rebuildPlaylist()
       noteMissingFile(PROJECT_ROOT);
       SD.end();
     }
-    if (fileExistsTracked("LFS://Banners/error.txt")) addSlide("TEXT", "LFS://Banners/error.txt", "LFS://Banners/error.txt", DEFAULT_SLIDE_MS);
+    if (fileExistsTracked("LFS://Banners/error.txt")) addSlide("TEXT", "LFS://Banners/error.txt", "LFS://Banners/error.txt", DEFAULT_SLIDE_MS, false);
     return;
   }
 
+  Serial.println("PLAYLIST: project root found");
   noteFileExists(PROJECT_ROOT);
+  Serial.println("PLAYLIST: parse root starting");
   parseRootPlaylistFile();
+  Serial.println("PLAYLIST: parse root complete");
   SD.end();
 
+  drawWorkNotice("Playlist ready", String(slideCount) + " slides");
   Serial.print("Runtime slides: ");
   Serial.println(slideCount);
+  printRuntimePlaylist();
 }

@@ -1,0 +1,11 @@
+1:Lamborghini
+2:American Challenge
+LD:Released:1992
+LD:Platform:DOS
+LD:Genre:Racing, Action
+LD:Theme:Automobile, Street Racing
+LD:Publisher:Titus France SA
+LD: SoftKey International, Inc
+LD:Developer:Titus France SA
+LD:Perspective:Behind View
+LD:Mode:Single / Multiplayer

@@ -1,0 +1,10 @@
+1:Police Quest
+2:In Pursuit of the Death Angel
+LD:Released:1987
+LD:Platform:DOS
+LD:Genre:Adventure
+LD:Theme:Police, Detective, Crime
+LD:Publisher:Sierra On-Line, Inc.
+LD:Developer:Sierra On-Line, Inc.
+LD:Perspective:Side-View
+LD:Mode:Single Player

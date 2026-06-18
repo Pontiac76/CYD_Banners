@@ -1,0 +1,11 @@
+1:688 Attack Sub
+LD:Year:1989
+LD:Platform:DOS
+LD:Released in:United States,Germany,
+LD: Italy, United Kingdom
+LD: Brazil
+LD:Genre:Simulation
+LD:Theme:Naval, Submarine
+LD:Publisher:Electronic Arts, Inc.
+LD: Ocean Software Ltd.
+LD:Perspective:1st-Person

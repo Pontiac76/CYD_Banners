@@ -1,0 +1,9 @@
+1:Duke Nukem
+LD:Year:1991
+LD:Platform:DOS
+LD:Genre:Action, Platformer
+LD:Theme:Sci-Fi, Aliens
+LD:Publisher:Apogee Software, Ltd.
+LD:Developer:Apogee Software, Ltd.
+LD:Perspective:Side-View
+LD:Mode:Single Player

@@ -6,6 +6,6 @@ Commodore 64 (With TeensyRom)
 2:Supported reasons to use:
 Tap an NFC card to launch a game in your library!
 Keep your favorite games at your finger tips!
-Get creative with how to interact with
-your retro and modern games!
+Can be used in an Arcade Cabinet!
+
 1:NOT for just Retro use!

@@ -1,0 +1,8 @@
+1:Stellar Conquest 3
+LD:Released:1995
+LD:Platform:DOS
+LD:Genre:Strategy
+LD:Theme:Sci-Fi, Space, 4X
+LD:Developer:NecroBones Software
+LD:Perspective:Top-Down
+LD:Mode:Single Player

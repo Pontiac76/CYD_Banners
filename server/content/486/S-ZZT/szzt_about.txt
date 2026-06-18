@@ -1,0 +1,9 @@
+1:Super ZZT
+LD:Released:1992
+LD:Platform:DOS
+LD:Genre:Action, Adventure
+LD:Theme:Fantasy, Puzzle Elements
+LD:Publisher:Epic MegaGames, Inc.
+LD:Developer:Tim Sweeney
+LD:Perspective:Top-Down
+LD:Mode:Single Player

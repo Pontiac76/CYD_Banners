@@ -1,0 +1,10 @@
+1:Tyrian
+LD:Released:1995
+LD:Platform:DOS
+LD:Genre:Action, Shooter
+LD:Theme:Sci-Fi, Vertical Scrolling
+LD:Publisher:CDV Software Entertainment AG
+LD: Epic MegaGames, Inc.
+LD:Developer:Eclipse Productions
+LD:Perspective:Top-Down, 2D Scrolling
+LD:Mode:Single / Multiplayer

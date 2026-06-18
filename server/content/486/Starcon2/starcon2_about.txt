@@ -1,0 +1,11 @@
+1:Star Control II
+2:The Ur-Quan Masters
+LD:Released:1992
+LD:Platform:DOS
+LD:Genre:Action, Adventure
+LD:Theme:Sci-Fi, Space Exploration
+LD:Publisher:Accolade, Inc.
+LD: Telstar Fun and Games Ltd.
+LD:Developer:Toys for Bob Inc.
+LD:Perspective:Top-Down
+LD:Mode:Single / Multiplayer

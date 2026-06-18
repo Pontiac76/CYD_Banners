@@ -1,0 +1,11 @@
+1:Stunts
+LD:Released:1990
+LD:Platform:DOS
+LD:Genre:Racing, Simulation
+LD:Theme:Automobile, Track Design
+LD:Publisher:Brøderbund Software, Inc.
+LD: Mindscape International Ltd.
+LD: Novitas GmbH
+LD:Developer:Distinctive Software, Inc.
+LD:Perspective:First-Person/Behind Car
+LD:Mode:Single Player

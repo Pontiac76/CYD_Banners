@@ -54,11 +54,25 @@ So `server/content/playlist.ini` becomes `SD://banners/playlist.ini`.
 
 `manifest.txt`, `sum.txt`, and converted `.cyd` image assets are regenerated from the `/admin/` page button or with the prepare script. `sum.txt`/`manifest.txt` endpoints only auto-generate if the files are missing.
 
-To fully prepare content manually, including converted images and indexes:
+To fully prepare content manually, including directory-local `gamelist.txt` skeletons, converted images, and indexes:
 
 ```cmd
 server\scripts\prepare_content.cmd
 ```
+
+To generate only `gamelist.txt` skeleton directories/about files/playlists manually:
+
+```cmd
+server\scripts\generate_gamelists.cmd
+```
+
+A `gamelist.txt` is processed relative to the directory containing it. Each non-comment line uses:
+
+```text
+path|shorthand|title text
+```
+
+For example, `server/content/486/gamelist.txt` line `Doom|doom|1:Doom` creates/maintains `server/content/486/Doom/doom_about.txt`, `server/content/486/Doom/doom_playlist.ini`, and `server/content/486/Doom/images/`. The about file and per-game playlist are created only if missing. The parent `playlist.ini` preserves existing lines/comments and only appends gamelist entries that are not already present, including entries that are currently commented out.
 
 To regenerate only the indexes manually:
 
@@ -74,4 +88,4 @@ To convert source images to CYD-ready RGB565 `.cyd` files:
 server\scripts\convert_images.cmd
 ```
 
-The converter scans `server/content/` for `.jpg`, `.jpeg`, and `.png` files and writes sibling `.cyd` files. Default output is 320x240 fit/letterbox to preserve the full source image. Use `--mode cover` to crop/fill instead. A sibling `.cyd.meta.json` tracks source hash and conversion settings so images are regenerated when size/mode/source content changes.
+The converter scans `server/content/` for `.jpg`, `.jpeg`, and `.png` files and writes sibling `.cyd` files. Default output is 320x240 fit/letterbox to preserve the full source image. Use `--mode cover` to crop/fill instead. Optional correction flags include `--auto-contrast`, `--brightness`, `--contrast`, `--saturation`, `--gamma`, and `--dither`; for washed-out photos, try something like `server\scripts\convert_images.cmd --force --auto-contrast --contrast 1.15 --saturation 1.1 --gamma 1.1 --dither`. The admin UI at `/admin/` can also run content regeneration with these image settings, persists the fields in a browser cookie, and collapses `manifest.txt` by default while leaving `sum.txt` visible. A sibling `.cyd.meta.json` tracks source hash and conversion settings so images are regenerated when size/mode/source content changes.

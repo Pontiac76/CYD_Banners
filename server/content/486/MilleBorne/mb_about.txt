@@ -1,0 +1,8 @@
+1:Mille Bornes
+LD:Released:1989
+LD:Platform:DOS
+LD:Genre:Strategy, Cards
+LD:Theme:Card Game
+LD:Publisher:TEGL Systems Corporation
+LD:Perspective:Top-Down
+LD:Mode:Single / Multiplayer

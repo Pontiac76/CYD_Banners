@@ -1,0 +1,11 @@
+1:Doom II
+2:Hell on Earth
+LD:Year:1994
+LD:Platform:DOS
+LD:Genre:Action, First-Person Shooter
+LD:Theme:Sci-Fi, Horror, Demons
+LD:Publisher:GT Interactive Software
+LD:Developer:id Software, Inc.
+LD:Engine:Doom Engine
+LD:Perspective:First-Person
+LD:Mode:Single / Multiplayer

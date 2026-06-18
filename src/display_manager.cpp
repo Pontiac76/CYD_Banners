@@ -4,6 +4,55 @@
 #include "network_manager.h"
 #include <qrcode.h>
 
+unsigned long lastWorkNoticeMs = 0;
+
+void drawWorkNotice(const String &line1, const String &line2)
+{
+  unsigned long now = millis();
+  if (now - lastWorkNoticeMs < 250) return;
+  lastWorkNoticeMs = now;
+
+  if (infoScreenVisible)
+  {
+    constexpr int w = 260;
+    constexpr int h = 58;
+    int x = (tft.width() - w) / 2;
+    int y = (tft.height() - h) / 2;
+    tft.fillRect(x, y, w, h, TFT_NAVY);
+    tft.drawRect(x, y, w, h, TFT_CYAN);
+    tft.drawRect(x + 1, y + 1, w - 2, h - 2, TFT_CYAN);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.drawString(line1, tft.width() / 2, y + 14, 2);
+    if (line2.length() > 0)
+    {
+      String shown = line2;
+      if (shown.length() > 34) shown = shown.substring(0, 31) + "...";
+      tft.setTextColor(TFT_YELLOW, TFT_NAVY);
+      tft.drawString(shown, tft.width() / 2, y + 35, 1);
+    }
+    return;
+  }
+
+  constexpr int h = 34;
+  tft.fillRect(0, 0, tft.width(), h, TFT_NAVY);
+  tft.drawRect(0, 0, tft.width(), h, TFT_CYAN);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextFont(1);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.drawString(line1, tft.width() / 2, 5, 1);
+  if (line2.length() > 0)
+  {
+    String shown = line2;
+    if (shown.length() > 38) shown = shown.substring(0, 35) + "...";
+    tft.setTextColor(TFT_YELLOW, TFT_NAVY);
+    tft.drawString(shown, tft.width() / 2, 18, 1);
+  }
+}
+
 void drawInfoLine(const String &label, const String &value, int y, uint16_t valueColor)
 {
   tft.setTextDatum(TL_DATUM);
@@ -71,9 +120,153 @@ void drawInfoScreen()
 
   tft.setTextDatum(TC_DATUM);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("touch to return now", tft.width() / 2, tft.height() - 16, 1);
+  tft.drawString("touch return | hold 8s reset manifest/sum", tft.width() / 2, tft.height() - 16, 1);
   resetDynamicDrawState();
   drawStatusBar();
+}
+
+enum class TextJustify
+{
+  Left,
+  Center,
+  Right
+};
+
+struct TextLineStyle
+{
+  int font = 2;
+  uint16_t color = TFT_LIGHTGREY;
+  TextJustify justify = TextJustify::Center;
+  bool mono = false;
+  bool delimited = false;
+};
+
+bool parseTextLineCommand(String &line, TextLineStyle &style)
+{
+  int colon = line.indexOf(':');
+  if (colon <= 0 || colon > 5) return false;
+
+  String command = line.substring(0, colon);
+  command.toUpperCase();
+  bool recognized = false;
+  bool mono = false;
+  int heading = 0;
+  for (int i = 0; i < command.length(); ++i)
+  {
+    char c = command.charAt(i);
+    if (c == '1')
+    {
+      heading = 1;
+      recognized = true;
+    }
+    else if (c == '2')
+    {
+      heading = 2;
+      recognized = true;
+    }
+    else if (c == 'L')
+    {
+      style.justify = TextJustify::Left;
+      recognized = true;
+    }
+    else if (c == 'R')
+    {
+      style.justify = TextJustify::Right;
+      recognized = true;
+    }
+    else if (c == 'M')
+    {
+      mono = true;
+      style.mono = true;
+      recognized = true;
+    }
+    else if (c == 'D')
+    {
+      style.delimited = true;
+      recognized = true;
+    }
+    else
+    {
+      return false;
+    }
+  }
+
+  if (!recognized) return false;
+  if (heading == 1)
+  {
+    style.font = 4;
+    style.color = TFT_WHITE;
+  }
+  else if (heading == 2)
+  {
+    style.font = 2;
+    style.color = color565(255, 255, 0);
+  }
+  else if (mono)
+  {
+    style.font = 1;
+  }
+
+  line = line.substring(colon + 1);
+  return true;
+}
+
+void drawStyledTextLine(const String &line, int y, const TextLineStyle &style)
+{
+  tft.setTextSize(1);
+  tft.setTextColor(style.color, TFT_BLACK);
+
+  if (style.delimited && style.justify == TextJustify::Left)
+  {
+    constexpr int leftX = 6;
+    constexpr int labelRightX = 96;
+    constexpr int colonX = 101;
+    constexpr int valueX = 113;
+    int colon = line.indexOf(':');
+    if (colon >= 0)
+    {
+      String label = line.substring(0, colon);
+      label.trim();
+      String value = line.substring(colon + 1);
+      if (value.startsWith(" ")) value = value.substring(1);
+
+      tft.setTextDatum(TR_DATUM);
+      tft.drawString(label, labelRightX, y, style.font);
+      tft.setTextDatum(TL_DATUM);
+      tft.drawString(":", colonX, y, style.font);
+      tft.drawString(value, valueX, y, style.font);
+      return;
+    }
+
+    if (line.startsWith(" "))
+    {
+      String value = line;
+      value.trim();
+      tft.setTextDatum(TL_DATUM);
+      tft.drawString(value, valueX, y, style.font);
+      return;
+    }
+
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(line, leftX, y, style.font);
+    return;
+  }
+
+  int x = tft.width() / 2;
+  uint8_t datum = TC_DATUM;
+  if (style.justify == TextJustify::Left)
+  {
+    x = 6;
+    datum = TL_DATUM;
+  }
+  else if (style.justify == TextJustify::Right)
+  {
+    x = tft.width() - 6;
+    datum = TR_DATUM;
+  }
+
+  tft.setTextDatum(datum);
+  tft.drawString(line, x, y, style.font);
 }
 
 void drawTextSlide(const String &path)
@@ -119,15 +312,11 @@ void drawTextSlide(const String &path)
   {
     String line = file.readStringUntil('\n');
     line.replace("\r", "");
-    int font = 2;
-    uint16_t color = TFT_LIGHTGREY;
-    if (line.startsWith("1:")) { font = 4; color = TFT_WHITE; line = line.substring(2); }
-    else if (line.startsWith("2:")) { font = 2; color = color565(255, 255, 0); line = line.substring(2); }
+    TextLineStyle style;
+    parseTextLineCommand(line, style);
 
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextColor(color, TFT_BLACK);
-    tft.drawString(line, tft.width() / 2, y, font);
-    y += (font == 4) ? 30 : 18;
+    drawStyledTextLine(line, y, style);
+    y += (style.font == 4) ? 30 : (style.font == 1 ? 10 : 18);
   }
   file.close();
   if (sdMountedForRender) SD.end();

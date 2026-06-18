@@ -1,0 +1,11 @@
+1:Battletech
+2:The Crescent Hawk's Inception
+LD:Year:1988
+LD:Platform:DOS
+LD:Released:United States
+LD:Genre:Role-Playing (RPG)
+LD:Theme:BattleMech, Licensed Title, 
+LD:  Turn-based, War
+LD:Publisher:Infocom, Inc.
+LD:Developer:Westwood Associates
+LD:Perspective:Top-Down

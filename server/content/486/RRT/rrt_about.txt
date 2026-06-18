@@ -1,0 +1,10 @@
+1:Sid Meier's Railroad Tycoon
+LD:Released:1990
+LD:Platform:DOS
+LD:Genre:Strategy, Simulation
+LD:Theme:Business, Trains, Management
+LD:Publisher:MicroProse Software, Inc.
+LD:Developer:MPS Labs
+LD:Designer:Sid Meier
+LD:Perspective:Top-Down
+LD:Mode:Single Player

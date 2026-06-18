@@ -19,10 +19,10 @@ constexpr int TOUCH_MOSI_PIN = 32;
 constexpr unsigned long STATUS_REDRAW_MS = 1000;
 constexpr unsigned long DEFAULT_SLIDE_MS = 10000;
 constexpr unsigned long INFO_SCREEN_TIMEOUT_MS = 60000;
-constexpr int MAX_SLIDES = 48;
-constexpr int MAX_PLAYLIST_FILES = 16;
+constexpr int MAX_SLIDES = 256;
+constexpr int MAX_PLAYLIST_FILES = 32;
 constexpr int MAX_MISSING_FILES = 8;
-constexpr int MAX_REQUIRED_FILES = 96;
+constexpr int MAX_REQUIRED_FILES = 256;
 constexpr const char *PROJECT_ROOT = "/banners";
 constexpr const char *ROOT_PLAYLIST = "/banners/playlist.ini";
 
@@ -32,6 +32,7 @@ struct Slide
   String pathOrPayload;
   String displayPath;
   unsigned long durationMs;
+  bool explicitDuration;
 };
 
 extern TFT_eSPI tft;

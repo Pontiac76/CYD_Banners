@@ -29,7 +29,64 @@ bool wifiAttemptActive = false;
 bool callHomeProblem = true;
 String lastLoggedConnectedSsid;
 String lastRemoteSum;
+String lastRemoteManifestBody;
 String lastGoodUpdateSource;
+unsigned long lastWorkNoticeMs = 0;
+
+} // namespace
+
+void drawInfoScreen();
+
+namespace
+{
+
+void drawWorkNotice(const String &line1, const String &line2 = String(""))
+{
+  updateStatusText = line2.length() > 0 ? line1 + ": " + line2 : line1;
+  unsigned long now = millis();
+  if (now - lastWorkNoticeMs < 250) return;
+  lastWorkNoticeMs = now;
+
+  if (infoScreenVisible)
+  {
+    constexpr int w = 260;
+    constexpr int h = 58;
+    int x = (tft.width() - w) / 2;
+    int y = (tft.height() - h) / 2;
+    tft.fillRect(x, y, w, h, TFT_NAVY);
+    tft.drawRect(x, y, w, h, TFT_CYAN);
+    tft.drawRect(x + 1, y + 1, w - 2, h - 2, TFT_CYAN);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, TFT_NAVY);
+    tft.drawString(line1, tft.width() / 2, y + 14, 2);
+    if (line2.length() > 0)
+    {
+      String shown = line2;
+      if (shown.length() > 34) shown = shown.substring(0, 31) + "...";
+      tft.setTextColor(TFT_YELLOW, TFT_NAVY);
+      tft.drawString(shown, tft.width() / 2, y + 35, 1);
+    }
+    return;
+  }
+
+  constexpr int h = 34;
+  tft.fillRect(0, 0, tft.width(), h, TFT_NAVY);
+  tft.drawRect(0, 0, tft.width(), h, TFT_CYAN);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextFont(1);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  tft.drawString(line1, tft.width() / 2, 5, 1);
+  if (line2.length() > 0)
+  {
+    String shown = line2;
+    if (shown.length() > 38) shown = shown.substring(0, 35) + "...";
+    tft.setTextColor(TFT_YELLOW, TFT_NAVY);
+    tft.drawString(shown, tft.width() / 2, 18, 1);
+  }
+}
 
 String trimCopy(String value)
 {
@@ -170,6 +227,8 @@ String trimBody(String value)
   return value;
 }
 
+bool ensureParentDirs(const String &sdPath);
+
 String readLocalSum()
 {
   String result;
@@ -191,6 +250,51 @@ String readLocalSum()
   digitalWrite(TOUCH_CS_PIN, HIGH);
   return result;
 }
+
+bool writeLocalTextFile(const String &sdPath, const String &body)
+{
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.print("Local file write failed, SD mount failed: ");
+    Serial.println(sdPath);
+    return false;
+  }
+
+  if (!ensureParentDirs(sdPath))
+  {
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.print("Local file write failed, mkdir failed: ");
+    Serial.println(sdPath);
+    return false;
+  }
+  File file = SD.open(sdPath, FILE_WRITE);
+  if (!file)
+  {
+    SD.end();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.print("Local file write failed, open failed: ");
+    Serial.println(sdPath);
+    return false;
+  }
+  file.print(body);
+  file.close();
+  SD.end();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  return true;
+}
+
+bool writeLocalManifest(const String &manifestBody)
+{
+  bool ok = writeLocalTextFile("/banners/manifest.txt", manifestBody.endsWith("\n") ? manifestBody : manifestBody + "\n");
+  if (ok) Serial.println("Local manifest updated: SD://banners/manifest.txt");
+  return ok;
+}
+
+void queueStaleSdCleanup();
 
 bool writeLocalSum(const String &sum)
 {
@@ -219,6 +323,8 @@ bool writeLocalSum(const String &sum)
   digitalWrite(TOUCH_CS_PIN, HIGH);
   Serial.print("Local sum updated: SD://banners/sum.txt = ");
   Serial.println(sum);
+  Serial.println("Local sum update complete; scheduling SD cleanup scan");
+  queueStaleSdCleanup();
   return true;
 }
 
@@ -244,7 +350,7 @@ struct ManifestEntry
   bool same;
 };
 
-constexpr int MAX_MANIFEST_ENTRIES = 96;
+constexpr int MAX_MANIFEST_ENTRIES = 256;
 ManifestEntry manifestEntries[MAX_MANIFEST_ENTRIES];
 int manifestEntryCount = 0;
 String backgroundDownloadQueue[MAX_MANIFEST_ENTRIES];
@@ -252,6 +358,80 @@ int backgroundDownloadCount = 0;
 int backgroundDownloadIndex = 0;
 int backgroundDownloadOkCount = 0;
 unsigned long nextBackgroundDownloadMs = 0;
+String cleanupDeleteQueue[MAX_MANIFEST_ENTRIES];
+int cleanupDeleteCount = 0;
+int cleanupDeleteIndex = 0;
+unsigned long nextCleanupDeleteMs = 0;
+HTTPClient *backgroundHttp = nullptr;
+File backgroundOut;
+String backgroundActivePath;
+String backgroundTmpPath;
+String backgroundSdPath;
+size_t backgroundExpectedSize = 0;
+String backgroundExpectedHash;
+int backgroundTotal = 0;
+int backgroundWritten = 0;
+bool manifestEntriesComplete = true;
+
+bool manifestWildcardMatch(const char *pattern, const char *text)
+{
+  while (*pattern)
+  {
+    if (*pattern == '*')
+    {
+      while (*(pattern + 1) == '*') ++pattern;
+      if (*(pattern + 1) == '\0') return true;
+      for (const char *scan = text; *scan; ++scan)
+      {
+        if (manifestWildcardMatch(pattern + 1, scan)) return true;
+      }
+      return manifestWildcardMatch(pattern + 1, text);
+    }
+    if (*pattern == '?')
+    {
+      if (*text == '\0') return false;
+      ++pattern;
+      ++text;
+      continue;
+    }
+    if (*pattern != *text) return false;
+    ++pattern;
+    ++text;
+  }
+  return *text == '\0';
+}
+
+bool hasManifestWildcard(const String &path)
+{
+  return path.indexOf('*') >= 0 || path.indexOf('?') >= 0;
+}
+
+bool manifestContainsRelPath(const String &relPath)
+{
+  for (int i = 0; i < manifestEntryCount; ++i)
+  {
+    if (manifestEntries[i].path == relPath) return true;
+  }
+  return false;
+}
+
+bool internalManifestHasEntries()
+{
+  return manifestEntryCount > 0;
+}
+
+void insertManifestMatchSorted(String matches[], int &matchCount, int maxMatches, const String &path)
+{
+  if (matchCount >= maxMatches) return;
+  int insertAt = matchCount;
+  while (insertAt > 0 && path < matches[insertAt - 1])
+  {
+    matches[insertAt] = matches[insertAt - 1];
+    --insertAt;
+  }
+  matches[insertAt] = path;
+  ++matchCount;
+}
 
 String normalizeSdComparePath(String path)
 {
@@ -266,6 +446,21 @@ String normalizeSdComparePath(String path)
   return path;
 }
 
+int internalCollectManifestMatches(const String &sdPattern, String matches[], int maxMatches)
+{
+  String normalizedPattern = normalizeSdComparePath(sdPattern);
+  int matchCount = 0;
+  for (int i = 0; i < manifestEntryCount; ++i)
+  {
+    String sdPath = normalizeSdComparePath(String("/banners/") + manifestEntries[i].path);
+    if (manifestWildcardMatch(normalizedPattern.c_str(), sdPath.c_str()))
+    {
+      insertManifestMatchSorted(matches, matchCount, maxMatches, sdPath);
+    }
+  }
+  return matchCount;
+}
+
 bool isPriorityManifestPath(const String &relPath)
 {
   if (relPath == "playlist.ini") return true;
@@ -276,7 +471,9 @@ bool isPriorityManifestPath(const String &relPath)
   }
   for (int i = 0; i < requiredFileCount; ++i)
   {
-    if (normalizeSdComparePath(requiredFiles[i]) == sdPath) return true;
+    String requiredPath = normalizeSdComparePath(requiredFiles[i]);
+    if (requiredPath == sdPath) return true;
+    if (hasManifestWildcard(requiredPath) && manifestWildcardMatch(requiredPath.c_str(), sdPath.c_str())) return true;
   }
   for (int i = 0; i < slideCount; ++i)
   {
@@ -297,8 +494,45 @@ bool ensureParentDirs(const String &sdPath)
   return true;
 }
 
-bool downloadManifestFile(const String &updateSource, const String &relPath)
+bool validateDownloadedFile(const String &tmpPath, size_t expectedSize, const String &expectedHash)
 {
+  File file = SD.open(tmpPath, FILE_READ);
+  if (!file)
+  {
+    Serial.print("DOWNLOAD validate open failed: ");
+    Serial.println(tmpPath);
+    return false;
+  }
+  size_t actualSize = file.size();
+  if (actualSize != expectedSize)
+  {
+    file.close();
+    Serial.print("DOWNLOAD validate size failed: ");
+    Serial.print(tmpPath);
+    Serial.print(" expected ");
+    Serial.print(expectedSize);
+    Serial.print(" actual ");
+    Serial.println(actualSize);
+    return false;
+  }
+  String actualHash = md5File(file);
+  file.close();
+  if (!actualHash.equalsIgnoreCase(expectedHash))
+  {
+    Serial.print("DOWNLOAD validate hash failed: ");
+    Serial.print(tmpPath);
+    Serial.print(" expected ");
+    Serial.print(expectedHash);
+    Serial.print(" actual ");
+    Serial.println(actualHash);
+    return false;
+  }
+  return true;
+}
+
+bool downloadManifestFile(const String &updateSource, const String &relPath, size_t expectedSize, const String &expectedHash, bool visibleWork)
+{
+  if (visibleWork) drawWorkNotice("Downloading", String("SD://banners/") + relPath);
   String url = updateSource + "/files/" + relPath;
   String sdPath = String("/banners/") + relPath;
   String tmpPath = sdPath + ".tmp";
@@ -346,6 +580,10 @@ bool downloadManifestFile(const String &updateSource, const String &relPath)
   int written = 0;
   while (http.connected() && (total < 0 || written < total))
   {
+    if (visibleWork && total > 0)
+    {
+      drawWorkNotice("Downloading", String(written / 1024) + "/" + String(total / 1024) + " KiB " + relPath);
+    }
     size_t available = stream->available();
     if (!available)
     {
@@ -359,6 +597,12 @@ bool downloadManifestFile(const String &updateSource, const String &relPath)
   }
   out.close();
   http.end();
+
+  if (!validateDownloadedFile(tmpPath, expectedSize, expectedHash))
+  {
+    SD.remove(tmpPath);
+    return false;
+  }
 
   SD.remove(sdPath);
   if (!SD.rename(tmpPath, sdPath))
@@ -374,12 +618,181 @@ bool downloadManifestFile(const String &updateSource, const String &relPath)
   return true;
 }
 
+int findManifestEntryIndex(const String &relPath)
+{
+  for (int i = 0; i < manifestEntryCount; ++i)
+  {
+    if (manifestEntries[i].path == relPath) return i;
+  }
+  return -1;
+}
+
+void clearCleanupDeletes()
+{
+  cleanupDeleteCount = 0;
+  cleanupDeleteIndex = 0;
+  nextCleanupDeleteMs = 0;
+}
+
+void queueCleanupPath(const String &sdPath)
+{
+  if (cleanupDeleteCount >= MAX_MANIFEST_ENTRIES) return;
+  for (int i = 0; i < cleanupDeleteCount; ++i)
+  {
+    if (cleanupDeleteQueue[i] == sdPath) return;
+  }
+  cleanupDeleteQueue[cleanupDeleteCount++] = sdPath;
+}
+
+void scanCleanupDir(const String &dirPath)
+{
+  File dir = SD.open(dirPath, FILE_READ);
+  if (!dir || !dir.isDirectory())
+  {
+    if (dir) dir.close();
+    return;
+  }
+  while (cleanupDeleteCount < MAX_MANIFEST_ENTRIES)
+  {
+    File entry = dir.openNextFile();
+    if (!entry) break;
+    String name = String(entry.name());
+    String path = name.startsWith("/") ? name : (dirPath == "/" ? String("/") + name : dirPath + "/" + name);
+    if (entry.isDirectory())
+    {
+      entry.close();
+      scanCleanupDir(path);
+    }
+    else
+    {
+      entry.close();
+      String rel = path;
+      if (rel.startsWith("/banners/")) rel = rel.substring(9);
+      bool keepLocalIndex = rel == "manifest.txt" || rel == "sum.txt";
+      bool tempFile = path.endsWith(".tmp") || path.indexOf("/tmp/") >= 0 || path.indexOf("/temp/") >= 0;
+      if (!keepLocalIndex && (tempFile || !manifestContainsRelPath(rel))) queueCleanupPath(path);
+    }
+  }
+  dir.close();
+}
+
+void queueStaleSdCleanup()
+{
+  Serial.println("Cleanup scan requested after sum.txt update");
+  clearCleanupDeletes();
+  if (!manifestEntriesComplete)
+  {
+    Serial.println("Cleanup scan skipped: manifest entry list overflow/incomplete");
+    return;
+  }
+  if (manifestEntryCount == 0)
+  {
+    Serial.println("Cleanup scan skipped: RAM manifest has no entries");
+    return;
+  }
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.println("Cleanup scan skipped: SD mount failed");
+    return;
+  }
+  Serial.print("Cleanup scan starting: RAM manifest entries ");
+  Serial.println(manifestEntryCount);
+  scanCleanupDir("/banners");
+  SD.end();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  if (cleanupDeleteCount == 0)
+  {
+    Serial.println("Cleanup scan complete: no stale/temp files queued");
+  }
+  if (cleanupDeleteCount > 0)
+  {
+    Serial.print("Cleanup deletes queued: ");
+    Serial.println(cleanupDeleteCount);
+    for (int i = 0; i < cleanupDeleteCount; ++i)
+    {
+      Serial.print("  DELETE ");
+      Serial.println(cleanupDeleteQueue[i]);
+    }
+  }
+}
+
+void processCleanupDelete()
+{
+  if (cleanupDeleteIndex >= cleanupDeleteCount) return;
+  unsigned long now = millis();
+  if (long(now - nextCleanupDeleteMs) < 0) return;
+  nextCleanupDeleteMs = now + 500UL;
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    Serial.println("Cleanup delete skipped: SD mount failed");
+    return;
+  }
+  String path = cleanupDeleteQueue[cleanupDeleteIndex++];
+  Serial.print("Cleanup delete ");
+  Serial.print(cleanupDeleteIndex);
+  Serial.print("/");
+  Serial.print(cleanupDeleteCount);
+  Serial.print(": ");
+  Serial.println(path);
+  bool deleted = SD.remove(path);
+  if (deleted)
+  {
+    Serial.print("Cleanup deleted: ");
+    Serial.println(path);
+  }
+  else
+  {
+    Serial.print("Cleanup delete failed: ");
+    Serial.println(path);
+  }
+  bool cleanupComplete = cleanupDeleteIndex >= cleanupDeleteCount;
+  SD.end();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  if (cleanupComplete)
+  {
+    Serial.println("Cleanup deletes complete; rebuilding runtime playlist");
+    rebuildPlaylist();
+  }
+}
+
 void clearBackgroundDownloads()
 {
   backgroundDownloadCount = 0;
   backgroundDownloadIndex = 0;
   backgroundDownloadOkCount = 0;
   nextBackgroundDownloadMs = 0;
+  if (backgroundOut) backgroundOut.close();
+  if (backgroundHttp)
+  {
+    backgroundHttp->end();
+    delete backgroundHttp;
+    backgroundHttp = nullptr;
+  }
+  backgroundActivePath = "";
+  backgroundTmpPath = "";
+  backgroundSdPath = "";
+  backgroundExpectedSize = 0;
+  backgroundExpectedHash = "";
+  backgroundTotal = 0;
+  backgroundWritten = 0;
+}
+
+bool priorityChangesPending()
+{
+  for (int i = 0; i < manifestEntryCount; ++i)
+  {
+    if (manifestEntries[i].same) continue;
+    String lowerPath = manifestEntries[i].path;
+    lowerPath.toLowerCase();
+    if (lowerPath.endsWith(".ini") || lowerPath.endsWith(".play") || isPriorityManifestPath(manifestEntries[i].path)) return true;
+  }
+  return false;
 }
 
 void queueBackgroundDownloads()
@@ -408,13 +821,33 @@ void queueBackgroundDownloads()
   }
 }
 
+bool backgroundDownloadsPending()
+{
+  return backgroundDownloadIndex < backgroundDownloadCount;
+}
+
+void finishBackgroundQueueIfDone()
+{
+  if (backgroundDownloadIndex < backgroundDownloadCount) return;
+  Serial.print("Background downloads complete: ok ");
+  Serial.print(backgroundDownloadOkCount);
+  Serial.print("/");
+  Serial.println(backgroundDownloadCount);
+  if (backgroundDownloadOkCount == backgroundDownloadCount && lastRemoteSum.length() > 0)
+  {
+    if (lastRemoteManifestBody.length() > 0) writeLocalManifest(lastRemoteManifestBody);
+    writeLocalSum(lastRemoteSum);
+    updateStatusText = "content current";
+  }
+}
+
 void processBackgroundDownload()
 {
   if (backgroundDownloadIndex >= backgroundDownloadCount) return;
   if (WiFi.status() != WL_CONNECTED) return;
   unsigned long now = millis();
   if (long(now - nextBackgroundDownloadMs) < 0) return;
-  nextBackgroundDownloadMs = now + 1000UL;
+  nextBackgroundDownloadMs = now + 1500UL;
 
   bool mounted = SD.begin(SD_CS_PIN);
   sdOk = mounted;
@@ -440,27 +873,57 @@ void processBackgroundDownload()
   Serial.print(backgroundDownloadCount);
   Serial.print(": SD://banners/");
   Serial.println(path);
-  if (downloadManifestFile(source, path)) ++backgroundDownloadOkCount;
+  int manifestIndex = findManifestEntryIndex(path);
+  if (manifestIndex >= 0 && downloadManifestFile(source, path, manifestEntries[manifestIndex].size, manifestEntries[manifestIndex].hash, false)) ++backgroundDownloadOkCount;
   SD.end();
   digitalWrite(TOUCH_CS_PIN, HIGH);
 
-  if (backgroundDownloadIndex >= backgroundDownloadCount)
+  finishBackgroundQueueIfDone();
+}
+
+bool findManifestLineEntry(const String &manifestBody, const String &relPath, String &hash, size_t &size)
+{
+  int cursor = 0;
+  while (cursor < manifestBody.length())
   {
-    Serial.print("Background downloads complete: ok ");
-    Serial.print(backgroundDownloadOkCount);
-    Serial.print("/");
-    Serial.println(backgroundDownloadCount);
-    if (backgroundDownloadOkCount == backgroundDownloadCount && lastRemoteSum.length() > 0)
-    {
-      writeLocalSum(lastRemoteSum);
-      updateStatusText = "content current";
-    }
+    int next = manifestBody.indexOf('\n', cursor);
+    if (next < 0) next = manifestBody.length();
+    String line = manifestBody.substring(cursor, next);
+    line.replace("\r", "");
+    line.trim();
+    cursor = next + 1;
+
+    if (!line.startsWith("FILE ")) continue;
+    int hashStart = 5;
+    int hashEnd = line.indexOf(' ', hashStart);
+    int sizeEnd = hashEnd >= 0 ? line.indexOf(' ', hashEnd + 1) : -1;
+    if (hashEnd < 0 || sizeEnd < 0) continue;
+    String linePath = line.substring(sizeEnd + 1);
+    linePath.trim();
+    if (linePath != relPath) continue;
+    hash = line.substring(hashStart, hashEnd);
+    size = line.substring(hashEnd + 1, sizeEnd).toInt();
+    return true;
   }
+  return false;
+}
+
+String readLocalManifestBody()
+{
+  String result;
+  File file = SD.open("/banners/manifest.txt", FILE_READ);
+  if (file)
+  {
+    result = file.readString();
+    file.close();
+  }
+  return result;
 }
 
 bool reportManifestPlan(const String &manifestBody, bool verbose)
 {
   Serial.println(verbose ? "Manifest planning started" : "Manifest verification started");
+  drawWorkNotice(verbose ? "Manifest planning" : "Manifest verify", "starting");
   bool mounted = SD.begin(SD_CS_PIN);
   sdOk = mounted;
   if (!mounted)
@@ -470,8 +933,11 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
     return false;
   }
 
+  String localManifestBody = readLocalManifestBody();
   manifestEntryCount = 0;
+  manifestEntriesComplete = true;
   int sameCount = 0;
+  int manifestSameCount = 0;
   int changedCount = 0;
   int missingCount = 0;
   int fileCount = 0;
@@ -496,12 +962,67 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
     String relPath = line.substring(sizeEnd + 1);
     relPath.trim();
     String sdPath = String("/banners/") + relPath;
+    String lowerRelPath = relPath;
+    lowerRelPath.toLowerCase();
+    bool priorityPath = lowerRelPath.endsWith(".ini") || lowerRelPath.endsWith(".play") || isPriorityManifestPath(relPath);
     ++fileCount;
+    if (priorityPath && (fileCount == 1 || fileCount % 5 == 0))
+    {
+      drawWorkNotice(verbose ? "Manifest planning" : "Manifest verify", String(fileCount) + " files, checking " + relPath);
+    }
     int entryIndex = -1;
     if (manifestEntryCount < MAX_MANIFEST_ENTRIES)
     {
       entryIndex = manifestEntryCount++;
       manifestEntries[entryIndex] = {expectedHash, expectedSize, relPath, false};
+    }
+    else
+    {
+      manifestEntriesComplete = false;
+    }
+
+    String localHash;
+    size_t localSize = 0;
+    bool localManifestSame = findManifestLineEntry(localManifestBody, relPath, localHash, localSize) && localSize == expectedSize && localHash.equalsIgnoreCase(expectedHash);
+    if (localManifestSame)
+    {
+      if (!priorityPath)
+      {
+        ++sameCount;
+        ++manifestSameCount;
+        if (entryIndex >= 0) manifestEntries[entryIndex].same = true;
+        continue;
+      }
+      File manifestSameFile = SD.open(sdPath, FILE_READ);
+      if (!manifestSameFile && relPath.startsWith("Banners/")) manifestSameFile = SD.open(String("/banners/") + relPath.substring(8), FILE_READ);
+      if (!manifestSameFile && relPath.startsWith("banners/")) manifestSameFile = SD.open(String("/banners/") + relPath.substring(8), FILE_READ);
+      if (manifestSameFile && manifestSameFile.size() == expectedSize)
+      {
+        manifestSameFile.close();
+        ++sameCount;
+        ++manifestSameCount;
+        if (entryIndex >= 0) manifestEntries[entryIndex].same = true;
+        if (verbose)
+        {
+          Serial.print("PLAN priority manifest same: SD://banners/");
+          Serial.println(relPath);
+        }
+        continue;
+      }
+      if (manifestSameFile) manifestSameFile.close();
+      Serial.print("PLAN priority local manifest claimed same but SD missing/size mismatch: SD://banners/");
+      Serial.println(relPath);
+    }
+
+    if (!priorityPath)
+    {
+      ++changedCount;
+      if (verbose)
+      {
+        Serial.print("PLAN background changed by manifest: SD://banners/");
+        Serial.println(relPath);
+      }
+      continue;
     }
 
     File file = SD.open(sdPath, FILE_READ);
@@ -529,7 +1050,11 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
     size_t actualSize = file.size();
     String actualHash;
     bool sizeMatches = actualSize == expectedSize;
-    if (sizeMatches) actualHash = md5File(file);
+    if (sizeMatches)
+    {
+      if (actualSize > 32768) drawWorkNotice("MD5 checking", relPath);
+      actualHash = md5File(file);
+    }
     file.close();
 
     if (sizeMatches && actualHash.equalsIgnoreCase(expectedHash))
@@ -563,10 +1088,14 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
 
   SD.end();
   digitalWrite(TOUCH_CS_PIN, HIGH);
+  drawWorkNotice(verbose ? "Manifest planning" : "Manifest verify", "complete");
   Serial.print(verbose ? "Manifest planning complete: files " : "Manifest verification complete: files ");
   Serial.print(fileCount);
   Serial.print(", same ");
   Serial.print(sameCount);
+  Serial.print(" (manifest ");
+  Serial.print(manifestSameCount);
+  Serial.print(")");
   Serial.print(", changed ");
   Serial.print(changedCount);
   Serial.print(", missing ");
@@ -576,6 +1105,7 @@ bool reportManifestPlan(const String &manifestBody, bool verbose)
 
 void downloadPriorityChanges(const String &updateSource)
 {
+  drawWorkNotice("Priority downloads", "starting");
   bool mounted = SD.begin(SD_CS_PIN);
   sdOk = mounted;
   if (!mounted)
@@ -600,7 +1130,7 @@ void downloadPriorityChanges(const String &updateSource)
       if (!shouldDownload) continue;
 
       ++attempted;
-      if (downloadManifestFile(updateSource, manifestEntries[i].path))
+      if (downloadManifestFile(updateSource, manifestEntries[i].path, manifestEntries[i].size, manifestEntries[i].hash, true))
       {
         ++ok;
         if (isPlaylist) playlistDownloaded = true;
@@ -640,6 +1170,7 @@ void downloadPriorityChanges(const String &updateSource)
 
 void fetchManifest(const String &updateSource, const String &remoteSum)
 {
+  drawWorkNotice("Fetching manifest", "starting");
   clearBackgroundDownloads();
   String url = updateSource + "/manifest.txt";
   HTTPClient http;
@@ -649,6 +1180,7 @@ void fetchManifest(const String &updateSource, const String &remoteSum)
   {
     Serial.println("Manifest GET failed to begin");
     updateStatusText = "manifest begin failed";
+    if (infoScreenVisible) drawInfoScreen();
     return;
   }
 
@@ -671,15 +1203,21 @@ void fetchManifest(const String &updateSource, const String &remoteSum)
   if (code >= 200 && code < 300)
   {
     updateStatusText = "manifest fetched";
+    lastRemoteManifestBody = body;
     bool contentHealthy = reportManifestPlan(body, true);
     if (!contentHealthy)
     {
       downloadPriorityChanges(updateSource);
+      Serial.println("Priority downloads finished; rebuilding runtime playlist before background downloads");
+      rebuildPlaylist();
       bool nowHealthy = reportManifestPlan(body, false);
-      if (nowHealthy && remoteSum.length() > 0)
+      bool priorityHealthy = !priorityChangesPending();
+      if (priorityHealthy && remoteSum.length() > 0)
       {
+        queueBackgroundDownloads();
+        writeLocalManifest(body);
         writeLocalSum(remoteSum);
-        updateStatusText = "content current";
+        updateStatusText = nowHealthy ? "content current" : "background downloads queued";
       }
       else
       {
@@ -688,6 +1226,7 @@ void fetchManifest(const String &updateSource, const String &remoteSum)
     }
     else if (remoteSum.length() > 0)
     {
+      writeLocalManifest(body);
       writeLocalSum(remoteSum);
       updateStatusText = "content current";
     }
@@ -696,6 +1235,7 @@ void fetchManifest(const String &updateSource, const String &remoteSum)
   {
     updateStatusText = String("manifest HTTP ") + code;
   }
+  if (infoScreenVisible) drawInfoScreen();
 }
 
 void checkCallHome()
@@ -763,6 +1303,7 @@ void checkCallHome()
       }
       else
       {
+        drawWorkNotice("Content changed", "fetching updates");
         updateStatusText = "content changed";
         Serial.print("Content sum changed: local ");
         Serial.print(localSum.length() > 0 ? localSum : String("<missing>"));
@@ -803,7 +1344,10 @@ void networkUpdate()
   if (WiFi.status() == WL_CONNECTED)
   {
     wifiAttemptActive = false;
+    bool hadBackgroundDownloads = backgroundDownloadsPending();
     processBackgroundDownload();
+    bool stillHasBackgroundDownloads = backgroundDownloadsPending();
+    if (!hadBackgroundDownloads && !stillHasBackgroundDownloads) processCleanupDelete();
     String connectedSsid = WiFi.SSID();
     if (lastLoggedConnectedSsid != connectedSsid)
     {
@@ -816,6 +1360,11 @@ void networkUpdate()
       lastLoggedConnectedSsid = connectedSsid;
     }
     networkStatusText = String("connected ") + (currentWifiProfile >= 0 && currentWifiProfile < wifiProfileCount ? wifiProfiles[currentWifiProfile].name : String("WiFi"));
+    if (hadBackgroundDownloads || stillHasBackgroundDownloads)
+    {
+      if (stillHasBackgroundDownloads) updateStatusText = "downloading background";
+      return;
+    }
     if (lastCallHomeMs == 0 || now - lastCallHomeMs >= CALL_HOME_INTERVAL_MS)
     {
       bool mounted = LittleFS.begin(false);
@@ -870,4 +1419,43 @@ String currentWifiSsidText()
   if (currentWifiProfile >= 0 && currentWifiProfile < wifiProfileCount) return wifiProfiles[currentWifiProfile].name;
   if (WiFi.status() == WL_CONNECTED) return "connected";
   return "none";
+}
+
+bool resetLocalContentState()
+{
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    updateStatusText = "reset state SD failed";
+    Serial.println("Local content state reset failed: SD mount failed");
+    return false;
+  }
+  bool manifestRemoved = !SD.exists("/banners/manifest.txt") || SD.remove("/banners/manifest.txt");
+  bool sumRemoved = !SD.exists("/banners/sum.txt") || SD.remove("/banners/sum.txt");
+  SD.end();
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  lastRemoteSum = "";
+  lastRemoteManifestBody = "";
+  clearBackgroundDownloads();
+  clearCleanupDeletes();
+  manifestEntryCount = 0;
+  updateStatusText = manifestRemoved && sumRemoved ? "local state reset; update pending" : "reset state partial; update pending";
+  Serial.print("Local content state reset: manifest=");
+  Serial.print(manifestRemoved ? "removed" : "failed");
+  Serial.print(" sum=");
+  Serial.println(sumRemoved ? "removed" : "failed");
+  lastCallHomeMs = 0;
+  return manifestRemoved && sumRemoved;
+}
+
+bool manifestHasEntries()
+{
+  return internalManifestHasEntries();
+}
+
+int collectManifestMatches(const String &sdPattern, String matches[], int maxMatches)
+{
+  return internalCollectManifestMatches(sdPattern, matches, maxMatches);
 }

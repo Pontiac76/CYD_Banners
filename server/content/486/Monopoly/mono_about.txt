@@ -1,0 +1,11 @@
+1:Monopoly
+2:By Parker Brothers
+LD:Released:1989
+LD:Platform:DOS
+LD:Genre:Strategy, Board
+LD:Theme:Board Game
+LD:Publisher:Leisure Genius
+LD:Perspective:Top-Down
+LD:Mode:Single 
+LD: Multiplayer
+LD: Computer Players

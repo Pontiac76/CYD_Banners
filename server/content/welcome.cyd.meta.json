@@ -1,8 +1,0 @@
-{
-  "format": "CYDIMG1_RGB565_LE",
-  "height": 240,
-  "mode": "fit",
-  "source": "welcome.png",
-  "source_md5": "dcf3f3c1926e9a340f77251acc9ed20b",
-  "width": 320
-}

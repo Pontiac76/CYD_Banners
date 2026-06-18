@@ -1,5 +1,5 @@
 1:The 486DX2-80
-2: Quick Hardware Rundown
+2:Quick Hardware Rundown
 AMD 486DX2-80mhz
 32 Meg of EDO RAM
 32 Gig Compact Flash Card
