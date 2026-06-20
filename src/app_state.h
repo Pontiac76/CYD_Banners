@@ -42,6 +42,7 @@ extern bool littlefsOk;
 extern bool sdOk;
 extern bool infoScreenVisible;
 extern bool touchWasDown;
+extern bool updateUiLocked;
 extern unsigned long nextStatusRedrawMs;
 extern unsigned long slideStartedMs;
 extern unsigned long infoScreenEnteredMs;
@@ -56,6 +57,35 @@ extern String missingFiles[MAX_MISSING_FILES];
 extern int missingFileCount;
 extern String requiredFiles[MAX_REQUIRED_FILES];
 extern int requiredFileCount;
+
+void logWritePrefixIfNeeded();
+void logMarkLineEnded();
+
+inline void write()
+{
+}
+
+template <typename T>
+void write(const T &value)
+{
+  logWritePrefixIfNeeded();
+  Serial.print(value);
+}
+
+inline void writeln()
+{
+  logWritePrefixIfNeeded();
+  Serial.println();
+  logMarkLineEnded();
+}
+
+template <typename T>
+void writeln(const T &value)
+{
+  write(value);
+  Serial.println();
+  logMarkLineEnded();
+}
 
 uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
 String displayPath(const String &sdPath);

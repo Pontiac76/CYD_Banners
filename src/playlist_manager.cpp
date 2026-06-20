@@ -7,6 +7,15 @@
 constexpr const char *RUNTIME_PLAYLIST_CACHE = "/banners/runtime_playlist.cache";
 String parsedPlaylists[MAX_PLAYLIST_FILES];
 int parsedPlaylistCount = 0;
+
+String macNoColon()
+{
+  String mac = macAddressText();
+  mac.replace(":", "");
+  mac.replace("-", "");
+  mac.toUpperCase();
+  return mac;
+}
 constexpr int WILDCARD_BUFFER_DEPTH = 2;
 constexpr int MAX_WILDCARD_MATCHES = 64;
 String wildcardMatches[WILDCARD_BUFFER_DEPTH][MAX_WILDCARD_MATCHES];
@@ -106,7 +115,7 @@ bool addSlide(const String &type, const String &pathOrPayload, const String &dis
 {
   if (slideCount >= MAX_SLIDES)
   {
-    Serial.println("Slide list full; skipping item");
+    writeln("Slide list full; skipping item");
     return false;
   }
   slides[slideCount++] = {type, pathOrPayload, displayPathText, durationMs, explicitDuration};
@@ -248,7 +257,9 @@ bool expandWildcardPath(const String &path, unsigned long durationMs, bool expli
   }
 
   int matchCount = 0;
-  if (manifestHasEntries())
+  String ext = lowerExtension(path);
+  bool useManifestMatches = manifestHasEntries() && ext != ".ini" && ext != ".play";
+  if (useManifestMatches)
   {
     matchCount = collectManifestMatches(path, matches, MAX_WILDCARD_MATCHES);
   }
@@ -260,8 +271,8 @@ bool expandWildcardPath(const String &path, unsigned long durationMs, bool expli
   if (matchCount == 0)
   {
     drawWorkNotice("No wildcard matches", displayPath(path));
-    Serial.print("Wildcard playlist entry matched no files: ");
-    Serial.println(displayPath(path));
+    write("Wildcard playlist entry matched no files: ");
+    writeln(displayPath(path));
     noteMissingFile(path);
     --wildcardExpansionDepth;
     return true;
@@ -330,15 +341,15 @@ void processResolvedPath(const String &path, unsigned long durationMs, bool expl
   }
   else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp")
   {
-    Serial.print("Unsupported source image referenced, server conversion needed: ");
-    Serial.println(displayPath(path));
+    write("Unsupported source image referenced, server conversion needed: ");
+    writeln(displayPath(path));
     if (!fileExistsTracked(path)) return;
     addSlide("UNSUPPORTED_IMAGE", path, displayPath(path), durationMs, explicitDuration);
   }
   else
   {
-    Serial.print("Unknown playlist entry extension: ");
-    Serial.println(displayPath(path));
+    write("Unknown playlist entry extension: ");
+    writeln(displayPath(path));
   }
 }
 
@@ -369,7 +380,7 @@ bool writeCachedPlaylist()
   File file = SD.open(RUNTIME_PLAYLIST_CACHE, FILE_WRITE);
   if (!file)
   {
-    Serial.println("Runtime playlist cache write failed: open failed");
+    writeln("Runtime playlist cache write failed: open failed");
     return false;
   }
   file.println("CYDPLAY1");
@@ -397,32 +408,32 @@ bool writeCachedPlaylist()
     file.println(slides[i].displayPath);
   }
   file.close();
-  Serial.print("Runtime playlist cache written: slides ");
-  Serial.print(slideCount);
-  Serial.print(", required ");
-  Serial.print(requiredFileCount);
-  Serial.print(", playlists ");
-  Serial.println(parsedPlaylistCount);
+  write("Runtime playlist cache written: slides ");
+  write(slideCount);
+  write(", required ");
+  write(requiredFileCount);
+  write(", playlists ");
+  writeln(parsedPlaylistCount);
   return true;
 }
 
 bool loadCachedPlaylist()
 {
-  Serial.println("PLAYLIST: loading runtime cache");
+  writeln("PLAYLIST: loading runtime cache");
   bool mounted = SD.begin(SD_CS_PIN);
   sdOk = mounted;
   if (!mounted)
   {
     digitalWrite(TOUCH_CS_PIN, HIGH);
-    Serial.println("PLAYLIST: cache load SD mount failed");
+    writeln("PLAYLIST: cache load SD mount failed");
     return false;
   }
   File file = SD.open(RUNTIME_PLAYLIST_CACHE, FILE_READ);
   if (!file)
   {
-    SD.end();
+    /* SD stays mounted */
     digitalWrite(TOUCH_CS_PIN, HIGH);
-    Serial.println("PLAYLIST: runtime cache missing");
+    writeln("PLAYLIST: runtime cache missing");
     return false;
   }
   String header = file.readStringUntil('\n');
@@ -431,9 +442,9 @@ bool loadCachedPlaylist()
   if (header != "CYDPLAY1")
   {
     file.close();
-    SD.end();
+    /* SD stays mounted */
     digitalWrite(TOUCH_CS_PIN, HIGH);
-    Serial.println("PLAYLIST: runtime cache bad header");
+    writeln("PLAYLIST: runtime cache bad header");
     return false;
   }
 
@@ -462,43 +473,113 @@ bool loadCachedPlaylist()
     }
   }
   file.close();
-  SD.end();
+  /* SD stays mounted */
   digitalWrite(TOUCH_CS_PIN, HIGH);
-  Serial.print("PLAYLIST: runtime cache loaded slides ");
-  Serial.print(slideCount);
-  Serial.print(", required ");
-  Serial.print(requiredFileCount);
-  Serial.print(", playlists ");
-  Serial.println(parsedPlaylistCount);
+  write("PLAYLIST: runtime cache loaded slides ");
+  write(slideCount);
+  write(", required ");
+  write(requiredFileCount);
+  write(", playlists ");
+  writeln(parsedPlaylistCount);
   return slideCount > 0;
+}
+
+int currentGeneratedPlaylistChunk = -1;
+bool usingGeneratedPlaylistChunks = false;
+
+bool loadGeneratedPlaylistChunk(int chunkIndex)
+{
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    writeln("PLAYLIST: generated chunk load SD mount failed");
+    return false;
+  }
+
+  char name[32];
+  snprintf(name, sizeof(name), "/playlist_%03d.ini", chunkIndex);
+  String chunkPath = String(PROJECT_ROOT) + "/_generated/playlists/" + macNoColon() + name;
+  if (!SD.exists(chunkPath))
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    return false;
+  }
+
+  File file = SD.open(chunkPath, FILE_READ);
+  if (!file)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    write("PLAYLIST: generated chunk open failed: ");
+    writeln(chunkPath);
+    return false;
+  }
+
+  slideCount = 0;
+  parsedPlaylistCount = 0;
+  requiredFileCount = 0;
+  currentSlideIndex = -1;
+  if (parsedPlaylistCount < MAX_PLAYLIST_FILES) parsedPlaylists[parsedPlaylistCount++] = chunkPath;
+
+  while (file.available())
+  {
+    String value;
+    if (readPlaylistPathLine(file.readStringUntil('\n'), value)) processPathEntry(value, String(PROJECT_ROOT));
+  }
+  file.close();
+  currentGeneratedPlaylistChunk = chunkIndex;
+  usingGeneratedPlaylistChunks = true;
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  write("PLAYLIST: generated chunk loaded ");
+  write(chunkIndex);
+  write(" slides ");
+  write(slideCount);
+  write(", required ");
+  writeln(requiredFileCount);
+  return slideCount > 0;
+}
+
+bool loadGeneratedPlaylistChunks()
+{
+  writeln("PLAYLIST: loading generated playlist chunk 0");
+  return loadGeneratedPlaylistChunk(0);
+}
+
+bool loadNextGeneratedPlaylistChunk()
+{
+  if (!usingGeneratedPlaylistChunks) return false;
+  int nextChunk = currentGeneratedPlaylistChunk + 1;
+  if (loadGeneratedPlaylistChunk(nextChunk)) return true;
+  return loadGeneratedPlaylistChunk(0);
 }
 
 void printRuntimePlaylist()
 {
-  Serial.println("Runtime playlist:");
+  writeln("Runtime playlist:");
   if (slideCount == 0)
   {
-    Serial.println("  <none>");
+    writeln("  <none>");
     return;
   }
 
   for (int i = 0; i < slideCount; ++i)
   {
-    Serial.print("  ");
-    Serial.print(i + 1);
-    Serial.print(". ");
-    Serial.print(slides[i].type);
-    Serial.print(" ");
-    Serial.print(slides[i].displayPath);
-    Serial.print(" duration=");
+    write("  ");
+    write(i + 1);
+    write(". ");
+    write(slides[i].type);
+    write(" ");
+    write(slides[i].displayPath);
+    write(" duration=");
     if (!slides[i].explicitDuration)
     {
-      Serial.println("(Default)");
+      writeln("(Default)");
     }
     else
     {
-      Serial.print(slides[i].durationMs / 1000UL);
-      Serial.println("s");
+      write(slides[i].durationMs / 1000UL);
+      writeln("s");
     }
   }
 }
@@ -556,39 +637,39 @@ void parseRootPlaylistFile()
 
 void rebuildPlaylist()
 {
-  Serial.println("PLAYLIST: rebuild start");
+  writeln("PLAYLIST: rebuild start");
   drawWorkNotice("Building playlist", "starting");
   slideCount = 0;
   parsedPlaylistCount = 0;
   requiredFileCount = 0;
   currentSlideIndex = -1;
 
-  Serial.println("PLAYLIST: mounting SD");
+  writeln("PLAYLIST: mounting SD");
   sdOk = SD.begin(SD_CS_PIN);
-  Serial.print("PLAYLIST: SD mount ");
-  Serial.println(sdOk ? "ok" : "failed");
+  write("PLAYLIST: SD mount ");
+  writeln(sdOk ? "ok" : "failed");
   if (!sdOk || !SD.exists(PROJECT_ROOT))
   {
     if (sdOk)
     {
       noteMissingFile(PROJECT_ROOT);
-      SD.end();
+      /* SD stays mounted */
     }
     if (fileExistsTracked("LFS://Banners/error.txt")) addSlide("TEXT", "LFS://Banners/error.txt", "LFS://Banners/error.txt", DEFAULT_SLIDE_MS, false);
     return;
   }
 
-  Serial.println("PLAYLIST: project root found");
+  writeln("PLAYLIST: project root found");
   noteFileExists(PROJECT_ROOT);
-  Serial.println("PLAYLIST: parse root starting");
+  writeln("PLAYLIST: parse root starting");
   parseRootPlaylistFile();
-  Serial.println("PLAYLIST: parse root complete");
+  writeln("PLAYLIST: parse root complete");
   writeCachedPlaylist();
-  SD.end();
+  /* SD stays mounted */
 
   drawWorkNotice("Playlist ready", String(slideCount) + " slides");
-  Serial.print("Runtime slides: ");
-  Serial.println(slideCount);
+  write("Runtime slides: ");
+  writeln(slideCount);
   // Keep printRuntimePlaylist() available for temporary debugging, but avoid
   // dumping large playlists during normal operation.
 }

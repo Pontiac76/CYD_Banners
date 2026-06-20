@@ -7,6 +7,7 @@ bool littlefsOk = false;
 bool sdOk = false;
 bool infoScreenVisible = false;
 bool touchWasDown = false;
+bool updateUiLocked = false;
 unsigned long nextStatusRedrawMs = 0;
 unsigned long slideStartedMs = 0;
 unsigned long infoScreenEnteredMs = 0;
@@ -21,6 +22,21 @@ String missingFiles[MAX_MISSING_FILES];
 int missingFileCount = 0;
 String requiredFiles[MAX_REQUIRED_FILES];
 int requiredFileCount = 0;
+bool logLineStart = true;
+
+void logWritePrefixIfNeeded()
+{
+  if (!logLineStart) return;
+  char prefix[20];
+  snprintf(prefix, sizeof(prefix), "[%5lu] - ", millis() / 1000UL);
+  Serial.print(prefix);
+  logLineStart = false;
+}
+
+void logMarkLineEnded()
+{
+  logLineStart = true;
+}
 
 uint16_t color565(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -65,11 +81,11 @@ String displayPath(const String &sdPath)
 
 String macAddressText()
 {
-  uint64_t mac = ESP.getEfuseMac();
+  uint8_t mac[6] = {0};
+  WiFi.macAddress(mac);
   char text[18];
   snprintf(text, sizeof(text), "%02X:%02X:%02X:%02X:%02X:%02X",
-           uint8_t(mac >> 40), uint8_t(mac >> 32), uint8_t(mac >> 24),
-           uint8_t(mac >> 16), uint8_t(mac >> 8), uint8_t(mac));
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   return String(text);
 }
 
@@ -131,8 +147,8 @@ void noteFileExists(const String &path)
 
 void noteMissingFile(const String &path)
 {
-  Serial.print("Missing file: ");
-  Serial.println(displayPath(path));
+  write("Missing file: ");
+  writeln(displayPath(path));
   for (int i = 0; i < missingFileCount; ++i)
   {
     if (missingFiles[i] == path) return;

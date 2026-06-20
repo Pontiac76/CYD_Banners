@@ -28,30 +28,34 @@ void setup()
   littlefsOk = LittleFS.begin(false);
   if (littlefsOk) LittleFS.end();
   sdOk = SD.begin(SD_CS_PIN);
-  if (sdOk) SD.end();
+  if (sdOk) /* SD stays mounted */
 
-  Serial.println("CYD Banners firmware shell");
-  Serial.print("MAC: "); Serial.println(macAddressText());
-  Serial.print("LittleFS: "); Serial.println(littlefsOk ? "OK" : "FAIL");
-  Serial.print("SD: "); Serial.println(sdOk ? "OK" : "FAIL");
+  writeln("CYD Banners firmware shell");
+  write("MAC: "); writeln(macAddressText());
+  write("LittleFS: "); writeln(littlefsOk ? "OK" : "FAIL");
+  write("SD: "); writeln(sdOk ? "OK" : "FAIL");
 
-  Serial.println("BOOT: networkBegin starting");
+  writeln("BOOT: networkBegin starting");
   networkBegin();
-  Serial.println("BOOT: networkBegin complete");
-  Serial.println("BOOT: load cached playlist starting");
-  if (loadCachedPlaylist())
+  writeln("BOOT: networkBegin complete");
+  writeln("BOOT: load generated playlist chunks starting");
+  if (loadGeneratedPlaylistChunks())
   {
-    Serial.println("BOOT: cached playlist loaded");
+    writeln("BOOT: generated playlist chunks loaded");
+  }
+  else if (loadCachedPlaylist())
+  {
+    writeln("BOOT: cached playlist loaded");
   }
   else
   {
-    Serial.println("BOOT: cached playlist unavailable; rebuilding");
+    writeln("BOOT: playlist cache unavailable; rebuilding");
     rebuildPlaylist();
-    Serial.println("BOOT: rebuildPlaylist complete");
+    writeln("BOOT: rebuildPlaylist complete");
   }
-  Serial.println("BOOT: first render starting");
+  writeln("BOOT: first render starting");
   if (slideCount > 0) advanceSlide(true); else renderCurrentSlide();
-  Serial.println("BOOT: setup complete");
+  writeln("BOOT: setup complete");
 }
 
 void loop()
@@ -60,16 +64,22 @@ void loop()
   unsigned long nowMs = millis();
   if (long(nowMs - nextHeartbeatMs) >= 0)
   {
-    Serial.print("HEARTBEAT uptime=");
-    Serial.print(nowMs / 1000UL);
-    Serial.print("s slide=");
-    Serial.print(currentSlideIndex + 1);
-    Serial.print("/");
-    Serial.print(slideCount);
-    Serial.print(" wifi=");
-    Serial.print(WiFi.status() == WL_CONNECTED ? "connected" : "not-connected");
-    Serial.print(" update=");
-    Serial.println(updateStatusText);
+    write("HEARTBEAT slide=");
+    write(currentSlideIndex + 1);
+    write("/");
+    write(slideCount);
+    write(" wifi=");
+    write(WiFi.status() == WL_CONNECTED ? "connected" : "not-connected");
+    write(" heap=");
+    write(ESP.getFreeHeap());
+    write(" minHeap=");
+    write(ESP.getMinFreeHeap());
+    write(" maxAlloc=");
+    write(ESP.getMaxAllocHeap());
+    write(" stack=");
+    write(uxTaskGetStackHighWaterMark(nullptr));
+    write(" update=");
+    writeln(updateStatusText);
     nextHeartbeatMs = nowMs + 15000UL;
   }
   handleTouch();
@@ -83,7 +93,7 @@ void loop()
   }
 
   drawStatusBar();
-  advanceSlide(false);
+  if (!updateUiLocked) advanceSlide(false);
 
   if (long(nowMs - nextStatusRedrawMs) >= 0)
   {

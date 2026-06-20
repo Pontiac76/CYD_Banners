@@ -2,6 +2,7 @@
 
 #include "app_state.h"
 #include "network_manager.h"
+#include "playlist_manager.h"
 #include <qrcode.h>
 
 unsigned long lastWorkNoticeMs = 0;
@@ -97,7 +98,7 @@ void drawInfoScreen()
   bool sdMountedForInfo = sdOk && SD.begin(SD_CS_PIN);
   bool baseFound = sdMountedForInfo && SD.exists(PROJECT_ROOT);
   bool rootFound = sdMountedForInfo && SD.exists(ROOT_PLAYLIST);
-  if (sdMountedForInfo) SD.end();
+  if (sdMountedForInfo) /* SD stays mounted */
   digitalWrite(TOUCH_CS_PIN, HIGH);
 
   drawInfoLine("SD", sdOk ? "OK" : "FAIL", y, sdOk ? TFT_GREEN : TFT_RED); y += 13;
@@ -300,7 +301,7 @@ void drawTextSlide(const String &path)
   if (!file)
   {
     noteMissingFile(path);
-    if (sdMountedForRender) SD.end();
+    if (sdMountedForRender) /* SD stays mounted */
     if (lfsMountedForRender) LittleFS.end();
     digitalWrite(TOUCH_CS_PIN, HIGH);
     return;
@@ -319,7 +320,7 @@ void drawTextSlide(const String &path)
     y += (style.font == 4) ? 30 : (style.font == 1 ? 10 : 18);
   }
   file.close();
-  if (sdMountedForRender) SD.end();
+  if (sdMountedForRender) /* SD stays mounted */
   if (lfsMountedForRender) LittleFS.end();
   digitalWrite(TOUCH_CS_PIN, HIGH);
 }
@@ -353,7 +354,7 @@ bool readQrFile(const String &path, String &payload, String textLines[], int &te
   if (!file)
   {
     noteMissingFile(path);
-    if (sdMountedForRender) SD.end();
+    if (sdMountedForRender) /* SD stays mounted */
     if (lfsMountedForRender) LittleFS.end();
     return false;
   }
@@ -377,7 +378,7 @@ bool readQrFile(const String &path, String &payload, String textLines[], int &te
     if (textLineCount < maxTextLines) textLines[textLineCount++] = line;
   }
   file.close();
-  if (sdMountedForRender) SD.end();
+  if (sdMountedForRender) /* SD stays mounted */
   if (lfsMountedForRender) LittleFS.end();
   digitalWrite(TOUCH_CS_PIN, HIGH);
   return payload != "";
@@ -492,7 +493,7 @@ void drawImagePlaceholder(const String &path)
   File file = SD.open(storagePath(path), FILE_READ);
   if (!file)
   {
-    SD.end();
+    /* SD stays mounted */
     digitalWrite(TOUCH_CS_PIN, HIGH);
     noteMissingFile(path);
     tft.fillScreen(TFT_BLACK);
@@ -508,7 +509,7 @@ void drawImagePlaceholder(const String &path)
   if (file.readBytes(magic, 8) != 8 || memcmp(magic, "CYDIMG1\0", 8) != 0)
   {
     file.close();
-    SD.end();
+    /* SD stays mounted */
     digitalWrite(TOUCH_CS_PIN, HIGH);
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(TC_DATUM);
@@ -523,7 +524,7 @@ void drawImagePlaceholder(const String &path)
   if (file.read(dims, 4) != 4)
   {
     file.close();
-    SD.end();
+    /* SD stays mounted */
     digitalWrite(TOUCH_CS_PIN, HIGH);
     return;
   }
@@ -537,7 +538,7 @@ void drawImagePlaceholder(const String &path)
   if (!row)
   {
     file.close();
-    SD.end();
+    /* SD stays mounted */
     digitalWrite(TOUCH_CS_PIN, HIGH);
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -561,7 +562,7 @@ void drawImagePlaceholder(const String &path)
   tft.setSwapBytes(oldSwap);
   delete[] row;
   file.close();
-  SD.end();
+  /* SD stays mounted */
   digitalWrite(TOUCH_CS_PIN, HIGH);
   noteFileExists(path);
 }
@@ -605,6 +606,10 @@ void advanceSlide(bool force)
   unsigned long now = millis();
   if (!force && currentSlideIndex >= 0 && now - slideStartedMs < currentSlideDurationMs) return;
   if (slideCount == 0) return;
+  if (currentSlideIndex >= 0 && currentSlideIndex + 1 >= slideCount)
+  {
+    loadNextGeneratedPlaylistChunk();
+  }
   currentSlideIndex = (currentSlideIndex + 1) % slideCount;
   slideStartedMs = now;
   renderCurrentSlide();
