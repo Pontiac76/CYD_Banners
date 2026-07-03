@@ -3,6 +3,7 @@
 #include "app_state.h"
 #include "network_manager.h"
 #include "playlist_manager.h"
+#include "network_manager.h"
 #include <qrcode.h>
 
 unsigned long lastWorkNoticeMs = 0;
@@ -123,7 +124,6 @@ void drawInfoScreen()
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.drawString("touch return | hold 8s reset manifest/sum", tft.width() / 2, tft.height() - 16, 1);
   resetDynamicDrawState();
-  drawStatusBar();
 }
 
 enum class TextJustify
@@ -587,7 +587,6 @@ void renderCurrentSlide()
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.drawString("No playlist slides", tft.width() / 2, 80, 2);
-    drawStatusBar();
     return;
   }
 
@@ -597,12 +596,12 @@ void renderCurrentSlide()
   else if (slide.type == "QR") drawQrSlide(slide.pathOrPayload);
   else if (slide.type == "IMAGE") drawImagePlaceholder(slide.pathOrPayload);
   else if (slide.type == "UNSUPPORTED_IMAGE") drawUnsupportedImagePlaceholder(slide.pathOrPayload);
-  drawStatusBar();
 }
 
 void advanceSlide(bool force)
 {
   if (infoScreenVisible) return;
+  processAcceptedManifestScanStep();
   unsigned long now = millis();
   if (!force && currentSlideIndex >= 0 && now - slideStartedMs < currentSlideDurationMs) return;
   if (slideCount == 0) return;
@@ -615,30 +614,18 @@ void advanceSlide(bool force)
   renderCurrentSlide();
 }
 
-void drawStatusBar()
+void drawStatusBar(float progressFraction, uint16_t barColor)
 {
   constexpr int barHeight = 3;
-  unsigned long elapsed = infoScreenVisible ? millis() - infoScreenEnteredMs : millis() - slideStartedMs;
-  unsigned long period = infoScreenVisible ? INFO_SCREEN_TIMEOUT_MS : (currentSlideDurationMs > 0 ? currentSlideDurationMs : DEFAULT_SLIDE_MS);
-  int barWidth = map(elapsed % period, 0, period - 1, 0, tft.width());
-  uint16_t barColor = networkStatusBarColor();
-  uint16_t backgroundColor = color565(16, 16, 16);
+  uint16_t backgroundColor = color565(8, 8, 8);
   int y = tft.height() - barHeight;
 
-  if (lastBarWidth < 0 || lastBarColor != barColor || barWidth < lastBarWidth)
-  {
-    tft.fillRect(0, y, tft.width(), barHeight, backgroundColor);
-    if (barWidth > 0) tft.fillRect(0, y, barWidth, barHeight, barColor);
-  }
-  else if (barWidth > lastBarWidth)
-  {
-    tft.fillRect(lastBarWidth, y, barWidth - lastBarWidth, barHeight, barColor);
-  }
-  lastBarWidth = barWidth;
-  lastBarColor = barColor;
+  if (progressFraction < 0.0f) progressFraction = 0.0f;
+  if (progressFraction > 1.0f) progressFraction = 1.0f;
+
+  int barWidth = (int)(tft.width() * progressFraction);
+
+  tft.fillRect(0, y, barWidth, barHeight, barColor);
+  tft.fillRect(barWidth, y, tft.width(), barHeight, backgroundColor);
 }
 
-void drawRuntimeStatus()
-{
-  drawStatusBar();
-}

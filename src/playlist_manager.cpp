@@ -487,6 +487,69 @@ bool loadCachedPlaylist()
 int currentGeneratedPlaylistChunk = -1;
 bool usingGeneratedPlaylistChunks = false;
 
+bool manifestFileContainsRelPath(const char *manifestPath, const String &relPath)
+{
+  File manifest = SD.open(manifestPath, FILE_READ);
+  if (!manifest) return false;
+  while (manifest.available())
+  {
+    String line = manifest.readStringUntil('\n');
+    line.replace("\r", "");
+    line.trim();
+    if (!line.startsWith("FILE ")) continue;
+    int first = line.indexOf(' ');
+    int second = line.indexOf(' ', first + 1);
+    int third = line.indexOf(' ', second + 1);
+    if (third > 0 && line.substring(third + 1) == relPath)
+    {
+      manifest.close();
+      return true;
+    }
+  }
+  manifest.close();
+  return false;
+}
+
+bool generatedPlaylistChunkIsCurrent(int chunkIndex, const String &chunkPath)
+{
+  if (chunkIndex == 0 && !SD.exists("/banners/manifest.txt") && !SD.exists("/banners/manifest.txt.tmp")) return true;
+  String relPath = chunkPath;
+  if (relPath.startsWith(String(PROJECT_ROOT) + "/")) relPath = relPath.substring(String(PROJECT_ROOT).length() + 1);
+  return manifestFileContainsRelPath("/banners/manifest.txt.tmp", relPath) || manifestFileContainsRelPath("/banners/manifest.txt", relPath);
+}
+
+void deleteStaleGeneratedPlaylistChunks()
+{
+  String dirPath = String(PROJECT_ROOT) + "/_generated/playlists/" + macNoColon();
+  File dir = SD.open(dirPath, FILE_READ);
+  if (!dir || !dir.isDirectory())
+  {
+    if (dir) dir.close();
+    return;
+  }
+  File entry = dir.openNextFile();
+  while (entry)
+  {
+    String name = entry.name();
+    bool isDir = entry.isDirectory();
+    entry.close();
+    if (!isDir && name.endsWith(".ini"))
+    {
+      String path = name.startsWith("/") ? name : dirPath + "/" + name;
+      if (!generatedPlaylistChunkIsCurrent(0, path))
+      {
+        if (SD.remove(path))
+        {
+          write("PLAYLIST: deleted stale generated chunk absent from current/pending manifest: ");
+          writeln(path);
+        }
+      }
+    }
+    entry = dir.openNextFile();
+  }
+  dir.close();
+}
+
 bool loadGeneratedPlaylistChunk(int chunkIndex)
 {
   bool mounted = SD.begin(SD_CS_PIN);
@@ -504,6 +567,14 @@ bool loadGeneratedPlaylistChunk(int chunkIndex)
   if (!SD.exists(chunkPath))
   {
     digitalWrite(TOUCH_CS_PIN, HIGH);
+    return false;
+  }
+  if (!generatedPlaylistChunkIsCurrent(chunkIndex, chunkPath))
+  {
+    bool removed = SD.remove(chunkPath);
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    write(removed ? "PLAYLIST: deleted stale generated chunk not in current/pending manifest: " : "PLAYLIST: stale generated chunk delete failed: ");
+    writeln(chunkPath);
     return false;
   }
 
@@ -543,6 +614,13 @@ bool loadGeneratedPlaylistChunk(int chunkIndex)
 bool loadGeneratedPlaylistChunks()
 {
   writeln("PLAYLIST: loading generated playlist chunk 0");
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (mounted)
+  {
+    deleteStaleGeneratedPlaylistChunks();
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+  }
   return loadGeneratedPlaylistChunk(0);
 }
 

@@ -60,9 +60,17 @@ def expected_meta(
     }
 
 
-def meta_matches(meta_path: Path, expected: dict[str, object]) -> bool:
+def meta_matches(meta_path: Path, expected: dict[str, object], settings_sensitive: bool = True) -> bool:
     try:
-        return meta_path.exists() and json.loads(meta_path.read_text(encoding="utf-8")) == expected
+        if not meta_path.exists():
+            return False
+        actual = json.loads(meta_path.read_text(encoding="utf-8"))
+        if settings_sensitive:
+            return actual == expected
+        for key in ("source", "source_md5", "width", "height", "mode", "format"):
+            if actual.get(key) != expected.get(key):
+                return False
+        return True
     except Exception:
         return False
 
@@ -167,6 +175,7 @@ def convert_all(
     saturation: float = 1.0,
     gamma: float = 1.0,
     dither: bool = False,
+    settings_sensitive: bool = True,
 ) -> int:
     count = 0
     skipped = 0
@@ -174,7 +183,7 @@ def convert_all(
         dest = source.with_suffix(".cyd")
         meta_path = dest.with_suffix(dest.suffix + ".meta.json")
         meta = expected_meta(source, width, height, mode, auto_contrast, contrast, brightness, saturation, gamma, dither)
-        if not force and dest.exists() and meta_matches(meta_path, meta):
+        if not force and dest.exists() and meta_matches(meta_path, meta, settings_sensitive=settings_sensitive):
             skipped += 1
             continue
         convert_image(source, dest, width, height, mode, auto_contrast, contrast, brightness, saturation, gamma, dither)
@@ -195,7 +204,8 @@ def convert_all(
             adjustments.append("dither")
         adjustment_text = ", " + ", ".join(adjustments) if adjustments else ""
         print(f"Converted {source.relative_to(content_dir).as_posix()} -> {dest.relative_to(content_dir).as_posix()} ({mode} {width}x{height}{adjustment_text})")
-    print(f"Image conversion complete: converted {count}, skipped {skipped}")
+    if count > 0:
+        print(f"Image conversion complete: converted {count}, skipped {skipped}")
     return count
 
 

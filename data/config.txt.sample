@@ -4,3 +4,12 @@
 service_token=replace-with-private-random-string
 update_source_1=http://example.invalid/cyd-banners
 update_source_2=http://192.0.2.10:8080/cyd-banners
+
+# Timing tunables are seconds. Set to 0 to disable that scheduled check where supported.
+serial_heartbeat_seconds=15
+server_heartbeat_seconds=15
+call_home_seconds=60
+firmware_ota_first_check_seconds=30
+firmware_ota_check_seconds=600
+wifi_connect_window_seconds=9
+wifi_retry_idle_seconds=4

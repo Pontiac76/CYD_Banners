@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include <LittleFS.h>
 #include <MD5Builder.h>
+#include "scheduler.h"
 
 WifiProfile wifiProfiles[MAX_WIFI_PROFILES];
 int wifiProfileCount = 0;
@@ -17,12 +18,16 @@ String networkStatusText = "not started";
 String updateStatusText = "not checked";
 unsigned long lastCallHomeMs = 0;
 int wifiCompletedCycles = 0;
+unsigned long configSerialHeartbeatIntervalMs = 15000UL;
+unsigned long configServerHeartbeatIntervalMs = 15000UL;
+unsigned long configCallHomeIntervalMs = 60000UL;
+unsigned long configFirmwareOtaFirstCheckMs = 30000UL;
+unsigned long configFirmwareOtaCheckIntervalMs = 10UL * 60UL * 1000UL;
+unsigned long configWifiConnectWindowMs = 9000UL;
+unsigned long configWifiRetryIdleMs = 4000UL;
 
 namespace
 {
-constexpr unsigned long WIFI_CONNECT_WINDOW_MS = 9000;
-constexpr unsigned long WIFI_RETRY_IDLE_MS = 4000;
-constexpr unsigned long CALL_HOME_INTERVAL_MS = 60000;
 unsigned long wifiAttemptStartedMs = 0;
 unsigned long nextWifiAttemptMs = 0;
 bool wifiAttemptActive = false;
@@ -112,6 +117,16 @@ bool parseKeyValue(const String &line, String &key, String &value)
   return key.length() > 0;
 }
 
+unsigned long secondsConfigValue(const String &value, unsigned long currentMs)
+{
+  String trimmed = trimCopy(value);
+  if (trimmed.length() == 0) return currentMs;
+  unsigned long seconds = strtoul(trimmed.c_str(), nullptr, 10);
+  if (seconds == 0) return 0;
+  if (seconds > 4294967UL) return currentMs;
+  return seconds * 1000UL;
+}
+
 void loadWifiProfiles()
 {
   wifiProfileCount = 0;
@@ -195,6 +210,13 @@ void loadPrivateConfig()
       serviceTokenPresent = value.length() > 0;
     }
     else if (key.startsWith("update_source") && updateSourceCount < MAX_UPDATE_SOURCES && value.startsWith("http")) updateSources[updateSourceCount++] = value;
+    else if (key == "serial_heartbeat_seconds") configSerialHeartbeatIntervalMs = secondsConfigValue(value, configSerialHeartbeatIntervalMs);
+    else if (key == "server_heartbeat_seconds") configServerHeartbeatIntervalMs = secondsConfigValue(value, configServerHeartbeatIntervalMs);
+    else if (key == "call_home_seconds") configCallHomeIntervalMs = secondsConfigValue(value, configCallHomeIntervalMs);
+    else if (key == "firmware_ota_first_check_seconds") configFirmwareOtaFirstCheckMs = secondsConfigValue(value, configFirmwareOtaFirstCheckMs);
+    else if (key == "firmware_ota_check_seconds") configFirmwareOtaCheckIntervalMs = secondsConfigValue(value, configFirmwareOtaCheckIntervalMs);
+    else if (key == "wifi_connect_window_seconds") configWifiConnectWindowMs = secondsConfigValue(value, configWifiConnectWindowMs);
+    else if (key == "wifi_retry_idle_seconds") configWifiRetryIdleMs = secondsConfigValue(value, configWifiRetryIdleMs);
   }
   file.close();
   updateStatusText = String("token ") + (serviceTokenPresent ? "ok" : "missing") + ", sources " + updateSourceCount;
@@ -207,6 +229,13 @@ void loadPrivateConfig()
     write(": ");
     writeln(updateSources[i]);
   }
+  write("Timing config seconds: serialHeartbeat="); write(configSerialHeartbeatIntervalMs / 1000UL);
+  write(" serverHeartbeat="); write(configServerHeartbeatIntervalMs / 1000UL);
+  write(" callHome="); write(configCallHomeIntervalMs / 1000UL);
+  write(" otaFirst="); write(configFirmwareOtaFirstCheckMs / 1000UL);
+  write(" otaCheck="); write(configFirmwareOtaCheckIntervalMs / 1000UL);
+  write(" wifiWindow="); write(configWifiConnectWindowMs / 1000UL);
+  write(" wifiRetry="); writeln(configWifiRetryIdleMs / 1000UL);
 }
 
 void startNextWifiAttempt()
@@ -1222,6 +1251,19 @@ const char *REMOTE_SUM_TMP = "/banners/sum.txt.tmp";
 const char *DIFF_QUEUE_LIST = "/banners/_update/diff.list";
 const char *PRIORITY_QUEUE_LIST = "/banners/_update/p.list";
 const char *BACKGROUND_QUEUE_LIST = "/banners/_update/b.list";
+const char *ACCEPTED_MANIFEST_SCAN = "/banners/_verify/manifest.scan";
+const char *ACCEPTED_MANIFEST_SCAN_POS = "/banners/_verify/manifest.scan.pos";
+
+void discardPendingUpdateState(const char *reason)
+{
+  write("Discarding pending update state: ");
+  writeln(reason ? reason : "unknown");
+  SD.remove(REMOTE_MANIFEST_TMP);
+  SD.remove(REMOTE_SUM_TMP);
+  SD.remove(DIFF_QUEUE_LIST);
+  SD.remove(PRIORITY_QUEUE_LIST);
+  SD.remove(BACKGROUND_QUEUE_LIST);
+}
 
 const char *queueListPath(const char *queue)
 {
@@ -1234,8 +1276,28 @@ String queuePathFor(const char *queue, const String &relPath)
   return String(UPDATE_ROOT) + "/stage/" + queue + "/" + relPath;
 }
 
+bool queueListContains(const char *queue, const String &relPath)
+{
+  File f = SD.open(queueListPath(queue), FILE_READ);
+  if (!f) return false;
+  while (f.available())
+  {
+    String line = f.readStringUntil('\n');
+    line.replace("\r", "");
+    line.trim();
+    if (line == relPath)
+    {
+      f.close();
+      return true;
+    }
+  }
+  f.close();
+  return false;
+}
+
 bool appendQueueList(const char *queue, const String &relPath)
 {
+  if (queueListContains(queue, relPath)) return true;
   const char *listPath = queueListPath(queue);
   ensureParentDirs(listPath);
   File f = SD.open(listPath, FILE_APPEND);
@@ -1340,6 +1402,8 @@ bool pathIsInGeneratedPlaylistChunks(const String &relPath)
       String value;
       if (readPlaylistPathLine(file.readStringUntil('\n'), value))
       {
+        int optionSep = value.indexOf('|');
+        if (optionSep >= 0) value = value.substring(0, optionSep);
         String normalized = normalizeSdComparePath(value);
         String wanted = normalizeSdComparePath(String("/banners/") + relPath);
         if (normalized == wanted || (hasManifestWildcard(normalized) && manifestWildcardMatch(normalized.c_str(), wanted.c_str())))
@@ -1382,10 +1446,19 @@ bool downloadRemoteManifestToTmp(const String &updateSource)
     http.end();
     return false;
   }
+  if (!ensureParentDirs(String(REMOTE_MANIFEST_TMP)))
+  {
+    writeln("Pending manifest save failed: mkdir parent failed");
+    http.end();
+    return false;
+  }
+  SD.remove(ACCEPTED_MANIFEST_SCAN);
+  SD.remove(ACCEPTED_MANIFEST_SCAN_POS);
   SD.remove(REMOTE_MANIFEST_TMP);
   File out = SD.open(REMOTE_MANIFEST_TMP, FILE_WRITE);
   if (!out)
   {
+    writeln("Pending manifest save failed: open tmp failed");
     http.end();
     return false;
   }
@@ -1447,6 +1520,9 @@ bool buildDiffQueueFromPendingManifest()
   if (local) haveLocal = readNextManifestEntry(local, localPath, localHash, localSize);
 
   SD.remove(DIFF_QUEUE_LIST);
+  ensureParentDirs(DIFF_QUEUE_LIST);
+  File emptyDiffList = SD.open(DIFF_QUEUE_LIST, FILE_WRITE);
+  if (emptyDiffList) emptyDiffList.close();
   int diffCount = 0;
   int remoteCount = 0;
   unsigned long lastYieldMs = millis();
@@ -1549,6 +1625,42 @@ bool queueHasFiles(const char *queue)
   return readFirstQueueListPath(queue, rel);
 }
 
+int queueListCount(const char *queue)
+{
+  File f = SD.open(queueListPath(queue), FILE_READ);
+  if (!f) return 0;
+  int count = 0;
+  while (f.available())
+  {
+    String line = f.readStringUntil('\n');
+    line.replace("\r", "");
+    line.trim();
+    if (line.length() > 0) ++count;
+  }
+  f.close();
+  return count;
+}
+
+void logQueueHead(const char *queue, const char *label)
+{
+  String rel;
+  write(label);
+  write(" queue=");
+  write(queue);
+  write(" head=");
+  if (readFirstQueueListPath(queue, rel)) writeln(rel);
+  else writeln("<empty>");
+}
+
+bool liveFileMatchesPendingManifest(const String &relPath)
+{
+  String hash;
+  size_t size = 0;
+  if (!findPendingManifestEntry(relPath, hash, size)) return false;
+  String livePath = String("/banners/") + relPath;
+  return actualSdFileMatchesManifest(livePath, size, hash);
+}
+
 bool processOneQueuedDownload(const String &updateSource, const char *queue, bool visibleWork)
 {
   unsigned long locateStartMs = millis();
@@ -1568,8 +1680,20 @@ bool processOneQueuedDownload(const String &updateSource, const char *queue, boo
   }
   write(visibleWork ? "Priority queued download: " : "Background queued download: ");
   writeln(relPath);
+  if (liveFileMatchesPendingManifest(relPath))
+  {
+    write("Queued item already matches pending manifest; removing queue entry: ");
+    writeln(relPath);
+    if (fromList) removeFirstQueueListPath(queue);
+    logQueueHead(queue, "After already-current removal");
+    return true;
+  }
   bool ok = downloadToQueueFile(updateSource, relPath, queue, visibleWork);
-  if (ok && fromList) removeFirstQueueListPath(queue);
+  if (ok && fromList)
+  {
+    removeFirstQueueListPath(queue);
+    logQueueHead(queue, "After successful download removal");
+  }
   return ok;
 }
 
@@ -1683,14 +1807,57 @@ void promoteBackgroundPriorityRecursive(const String &dirPath, const String &bas
   dir.close();
 }
 
+void promoteBackgroundPriorityList()
+{
+  const char *listPath = BACKGROUND_QUEUE_LIST;
+  String tmpPath = String(listPath) + ".tmp";
+  File in = SD.open(listPath, FILE_READ);
+  if (!in) return;
+  SD.remove(tmpPath);
+  ensureParentDirs(tmpPath);
+  File out = SD.open(tmpPath, FILE_WRITE);
+  if (!out)
+  {
+    in.close();
+    return;
+  }
+
+  int promoted = 0;
+  while (in.available())
+  {
+    String relPath = in.readStringUntil('\n');
+    relPath.replace("\r", "");
+    relPath.trim();
+    if (relPath.length() == 0) continue;
+    if (pendingPathIsPriority(relPath))
+    {
+      if (appendQueueList("p", relPath)) ++promoted;
+    }
+    else
+    {
+      out.println(relPath);
+    }
+  }
+  in.close();
+  out.close();
+  SD.remove(listPath);
+  SD.rename(tmpPath, listPath);
+  if (promoted > 0)
+  {
+    write("Promoted background list entries to priority: ");
+    writeln(promoted);
+  }
+}
+
 void promoteBackgroundPriorityQueue()
 {
   int promoted = 0;
   String bBase = String(UPDATE_ROOT) + "/b";
   promoteBackgroundPriorityRecursive(bBase, bBase, promoted);
+  promoteBackgroundPriorityList();
   if (promoted > 0)
   {
-    write("Promoted background files to priority: ");
+    write("Promoted background staged files to priority: ");
     writeln(promoted);
   }
 }
@@ -1698,27 +1865,6 @@ void promoteBackgroundPriorityQueue()
 void classifyDiffQueue()
 {
   unsigned long startMs = millis();
-  for (int i = 0; i < MAX_MANIFEST_ENTRIES; ++i)
-  {
-    diffClassifyPaths[i] = "";
-    diffClassifyPriority[i] = false;
-  }
-  int count = 0;
-  File diffList = SD.open(DIFF_QUEUE_LIST, FILE_READ);
-  while (diffList && diffList.available() && count < MAX_MANIFEST_ENTRIES)
-  {
-    String relPath = diffList.readStringUntil('\n');
-    relPath.replace("\r", "");
-    relPath.trim();
-    if (relPath.length() > 0)
-    {
-      diffClassifyPaths[count] = relPath;
-      diffClassifyPriority[count] = (relPath == "playlist.ini" || isOwnGeneratedPlaylistChunk(relPath));
-      ++count;
-    }
-  }
-  if (diffList) diffList.close();
-  markPriorityFromGeneratedPlaylists(diffClassifyPaths, diffClassifyPriority, count);
   SD.remove(PRIORITY_QUEUE_LIST);
   SD.remove(BACKGROUND_QUEUE_LIST);
   ensureParentDirs(PRIORITY_QUEUE_LIST);
@@ -1726,19 +1872,114 @@ void classifyDiffQueue()
   if (emptyPriorityList) emptyPriorityList.close();
   File emptyBackgroundList = SD.open(BACKGROUND_QUEUE_LIST, FILE_WRITE);
   if (emptyBackgroundList) emptyBackgroundList.close();
-  int p = 0, b = 0;
-  for (int i = 0; i < count; ++i)
+
+  File diffList = SD.open(DIFF_QUEUE_LIST, FILE_READ);
+  if (!diffList)
   {
-    const char *queue = diffClassifyPriority[i] ? "p" : "b";
-    if (appendQueueList(queue, diffClassifyPaths[i]))
-    {
-      if (diffClassifyPriority[i]) ++p; else ++b;
-    }
-    serviceUiDuringLongWork();
+    writeln("Classified update queue failed: diff list missing");
+    return;
   }
+
+  int p = 0, b = 0, total = 0;
+  while (diffList.available())
+  {
+    String relPath = diffList.readStringUntil('\n');
+    relPath.replace("\r", "");
+    relPath.trim();
+    if (relPath.length() == 0) continue;
+
+    const char *queue = pendingPathIsPriority(relPath) ? "p" : "b";
+    if (appendQueueList(queue, relPath))
+    {
+      if (queue[0] == 'p') ++p; else ++b;
+      ++total;
+    }
+    if ((total % 25) == 0) serviceUiDuringLongWork();
+  }
+  diffList.close();
   SD.remove(DIFF_QUEUE_LIST);
   write("Classified update queue: priority "); write(p); write(", background "); write(b);
+  write(" total "); write(total);
   write(" elapsed="); write((millis() - startMs + 500UL) / 1000UL); writeln("s");
+}
+
+bool manifestFileAllFilesMatch(const char *manifestPath, const char *label)
+{
+  File manifest = SD.open(manifestPath, FILE_READ);
+  if (!manifest)
+  {
+    write(label);
+    writeln(" verify failed: manifest missing");
+    return false;
+  }
+
+  int checked = 0;
+  while (manifest.available())
+  {
+    String relPath, hash;
+    size_t size = 0;
+    if (parseManifestFileLine(manifest.readStringUntil('\n'), relPath, hash, size))
+    {
+      String livePath = String("/banners/") + relPath;
+      if (!actualSdFileMatchesManifest(livePath, size, hash))
+      {
+        write(label);
+        write(" verify missing/stale: ");
+        writeln(relPath);
+        manifest.close();
+        return false;
+      }
+      ++checked;
+      if ((checked % 25) == 0) serviceUiDuringLongWork();
+    }
+  }
+  manifest.close();
+  write(label);
+  write(" verify matched FILE entries: ");
+  writeln(checked);
+  return checked > 0;
+}
+
+bool pendingManifestAllFilesMatch()
+{
+  return manifestFileAllFilesMatch(REMOTE_MANIFEST_TMP, "Pending");
+}
+
+bool localManifestAllFilesMatch()
+{
+  return manifestFileAllFilesMatch("/banners/manifest.txt", "Local");
+}
+
+bool copyFileForScan(const char *fromPath, const char *toPath)
+{
+  ensureParentDirs(toPath);
+  File in = SD.open(fromPath, FILE_READ);
+  if (!in) return false;
+  SD.remove(toPath);
+  File out = SD.open(toPath, FILE_WRITE);
+  if (!out)
+  {
+    in.close();
+    return false;
+  }
+  uint8_t buf[512];
+  while (in.available())
+  {
+    int n = in.read(buf, sizeof(buf));
+    if (n > 0) out.write(buf, n);
+    serviceUiDuringLongWork();
+  }
+  out.close();
+  in.close();
+  SD.remove(ACCEPTED_MANIFEST_SCAN_POS);
+  File pos = SD.open(ACCEPTED_MANIFEST_SCAN_POS, FILE_WRITE);
+  if (pos)
+  {
+    pos.print("0\n");
+    pos.close();
+  }
+  writeln("Accepted manifest scan scheduled");
+  return true;
 }
 
 String readTextFileTrimmed(const char *path)
@@ -1755,7 +1996,12 @@ bool acceptPendingManifestAndSum()
   write("Pending accept check uptime=");
   write(millis() / 1000UL);
   writeln("s");
-  if (queueHasFiles("p") || queueHasFiles("b")) return false;
+  if (queueHasFiles("p") || queueHasFiles("b"))
+  {
+    logQueueHead("p", "Pending accept blocked");
+    logQueueHead("b", "Pending accept blocked");
+    return false;
+  }
   if (!SD.exists(REMOTE_MANIFEST_TMP)) return false;
   String pendingSum = readTextFileTrimmed(REMOTE_SUM_TMP);
   SD.remove("/banners/manifest.txt");
@@ -1764,6 +2010,7 @@ bool acceptPendingManifestAndSum()
     writeln("Pending accept failed: manifest rename failed");
     return false;
   }
+  copyFileForScan("/banners/manifest.txt", ACCEPTED_MANIFEST_SCAN);
   if (pendingSum.length() > 0) writeLocalSum(pendingSum);
   SD.remove(REMOTE_SUM_TMP);
   updateStatusText = "content current";
@@ -1806,6 +2053,7 @@ bool resumePendingUpdate(const String &updateSource)
       remote.close();
     }
     classifyDiffQueue();
+    promoteBackgroundPriorityQueue();
     write("UPDATE plan complete elapsed=");
     write((millis() - planStartMs + 500UL) / 1000UL);
     write("s uptime=");
@@ -1813,15 +2061,16 @@ bool resumePendingUpdate(const String &updateSource)
     writeln("s");
   }
 
-  // Classification already assigns changed files to p/ or b/. Re-scanning the
-  // background queue against every playlist chunk on each resume was very slow
-  // and blocked the UI between background downloads.
+  // Correct any stale/misclassified background entries before allowing
+  // background work. Priority always wins, including own generated playlist
+  // chunks and any files referenced by those chunks.
+  promoteBackgroundPriorityQueue();
   bool hadPriorityDownloads = queueHasFiles("p");
   bool priorityDownloadedOk = false;
   if (hadPriorityDownloads)
   {
     updateUiLocked = true;
-    drawWorkNotice("Priority downloads", "display paused");
+    drawWorkNotice("Preparing update", "display paused for priority content");
   }
 
   while (WiFi.status() == WL_CONNECTED && queueHasFiles("p"))
@@ -1927,6 +2176,7 @@ bool downloadToQueueFile(const String &updateSource, const String &relPath, cons
   if (!validateDownloadedFile(queuePath, size, hash))
   {
     writeZeroFile(queuePath);
+    discardPendingUpdateState("queued download validation failed; pending manifest may be stale");
     return false;
   }
   String livePath = String("/banners/") + relPath;
@@ -2299,6 +2549,97 @@ void fetchManifest(const String &updateSource, const String &remoteSum)
   if (infoScreenVisible) drawInfoScreen();
 }
 
+String urlencode(const String &value)
+{
+  const char *hex = "0123456789ABCDEF";
+  String out;
+  for (size_t i = 0; i < value.length(); ++i)
+  {
+    char c = value[i];
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~')
+    {
+      out += c;
+    }
+    else if (c == ' ')
+    {
+      out += '+';
+    }
+    else
+    {
+      out += '%';
+      out += hex[(uint8_t(c) >> 4) & 0x0F];
+      out += hex[uint8_t(c) & 0x0F];
+    }
+  }
+  return out;
+}
+
+void processAcceptedManifestScanStepImpl()
+{
+  if (!SD.exists(ACCEPTED_MANIFEST_SCAN)) return;
+  File posFile = SD.open(ACCEPTED_MANIFEST_SCAN_POS, FILE_READ);
+  uint32_t pos = 0;
+  if (posFile)
+  {
+    pos = (uint32_t)posFile.readString().toInt();
+    posFile.close();
+  }
+
+  File scan = SD.open(ACCEPTED_MANIFEST_SCAN, FILE_READ);
+  if (!scan)
+  {
+    SD.remove(ACCEPTED_MANIFEST_SCAN_POS);
+    return;
+  }
+  if (pos > scan.size()) pos = 0;
+  scan.seek(pos);
+
+  bool processed = false;
+  while (scan.available() && !processed)
+  {
+    String line = scan.readStringUntil('\n');
+    uint32_t nextPos = scan.position();
+    String relPath, hash;
+    size_t size = 0;
+    if (parseManifestFileLine(line, relPath, hash, size))
+    {
+      String livePath = String("/banners/") + relPath;
+      if (!actualSdFileMatchesManifest(livePath, size, hash))
+      {
+        write("Accepted manifest scan found missing/stale: ");
+        writeln(relPath);
+        scan.close();
+        SD.remove(ACCEPTED_MANIFEST_SCAN);
+        SD.remove(ACCEPTED_MANIFEST_SCAN_POS);
+        ::invalidateLocalContentSum(String("SD://banners/") + relPath);
+        return;
+      }
+      processed = true;
+    }
+    pos = nextPos;
+  }
+
+  bool done = !scan.available();
+  scan.close();
+  if (done)
+  {
+    SD.remove(ACCEPTED_MANIFEST_SCAN);
+    SD.remove(ACCEPTED_MANIFEST_SCAN_POS);
+    writeln("Accepted manifest scan complete");
+  }
+  else
+  {
+    SD.remove(ACCEPTED_MANIFEST_SCAN_POS);
+    File out = SD.open(ACCEPTED_MANIFEST_SCAN_POS, FILE_WRITE);
+    if (out)
+    {
+      out.print(pos);
+      out.print("\n");
+      out.close();
+    }
+  }
+}
+
 void checkCallHome()
 {
   lastCallHomeMs = millis();
@@ -2378,6 +2719,45 @@ void checkCallHome()
 }
 }
 
+void sendHeartbeatReport()
+{
+  if (WiFi.status() != WL_CONNECTED || !serviceTokenPresent || updateSourceCount == 0) return;
+
+  int priorityQueueCount = queueListCount("p");
+  int backgroundQueueCount = queueListCount("b");
+  String source = lastGoodUpdateSource.length() > 0 ? lastGoodUpdateSource : updateSources[0];
+  String url = source + "/heartbeat?t=" + serviceToken + "&mac=" + macAddressText() + "&update=" + urlencode(updateStatusText);
+  String logUrl = source + "/heartbeat?t=<redacted>&mac=" + macAddressText() + "&update=" + urlencode(updateStatusText);
+  if (priorityQueueCount > 0)
+  {
+    url += "&p=" + String(priorityQueueCount);
+    logUrl += "&p=" + String(priorityQueueCount);
+  }
+  if (backgroundQueueCount > 0)
+  {
+    url += "&b=" + String(backgroundQueueCount);
+    logUrl += "&b=" + String(backgroundQueueCount);
+  }
+
+  HTTPClient http;
+  http.setConnectTimeout(1000);
+  http.setTimeout(1000);
+  if (!http.begin(url)) return;
+  int code = http.GET();
+  http.end();
+  write("Heartbeat To Server: ");
+  write(logUrl);
+  write(" -> HTTP ");
+  writeln(code);
+  if (configServerHeartbeatIntervalMs > 0) scheduleTask(TASK_SERVER_HEARTBEAT, millis() + configServerHeartbeatIntervalMs);
+  else disableScheduledTask(TASK_SERVER_HEARTBEAT);
+}
+
+void processAcceptedManifestScanStep()
+{
+  processAcceptedManifestScanStepImpl();
+}
+
 void networkBegin()
 {
   WiFi.mode(WIFI_STA);
@@ -2437,7 +2817,7 @@ void networkUpdate()
         return;
       }
     }
-    if (lastCallHomeMs == 0 || now - lastCallHomeMs >= CALL_HOME_INTERVAL_MS)
+    if (configCallHomeIntervalMs > 0 && (lastCallHomeMs == 0 || now - lastCallHomeMs >= configCallHomeIntervalMs))
     {
       bool mounted = LittleFS.begin(false);
       littlefsOk = mounted;
@@ -2460,12 +2840,12 @@ void networkUpdate()
 
   callHomeProblem = true;
   lastLoggedConnectedSsid = "";
-  if (wifiAttemptActive && now - wifiAttemptStartedMs < WIFI_CONNECT_WINDOW_MS) return;
+  if (wifiAttemptActive && now - wifiAttemptStartedMs < configWifiConnectWindowMs) return;
   wifiAttemptActive = false;
   if (long(now - nextWifiAttemptMs) >= 0)
   {
     startNextWifiAttempt();
-    nextWifiAttemptMs = now + WIFI_CONNECT_WINDOW_MS + WIFI_RETRY_IDLE_MS;
+    nextWifiAttemptMs = now + configWifiConnectWindowMs + configWifiRetryIdleMs;
   }
 }
 
@@ -2475,9 +2855,18 @@ NetworkHealth networkHealth()
   return wifiCompletedCycles > 1 ? NetworkHealth::DisconnectedAfterCycle : NetworkHealth::Hunting;
 }
 
+bool contentSyncActive()
+{
+  return SD.exists(REMOTE_MANIFEST_TMP) || SD.exists(REMOTE_SUM_TMP) ||
+         SD.exists(DIFF_QUEUE_LIST) || queueHasFiles("p") || queueHasFiles("b") ||
+         backgroundDownloadsPending() || cleanupDeletesPending();
+}
+
 uint16_t networkStatusBarColor()
 {
-  switch (networkHealth())
+  NetworkHealth health = networkHealth();
+  if (WiFi.status() == WL_CONNECTED && contentSyncActive()) return TFT_BLUE; // #0000FF: connected and content sync in progress
+  switch (health)
   {
     case NetworkHealth::ConnectedGood: return TFT_GREEN;
     case NetworkHealth::ConnectedProblem: return TFT_YELLOW;
@@ -2492,6 +2881,108 @@ String currentWifiSsidText()
   if (currentWifiProfile >= 0 && currentWifiProfile < wifiProfileCount) return wifiProfiles[currentWifiProfile].name;
   if (WiFi.status() == WL_CONNECTED) return "connected";
   return "none";
+}
+
+String missingReasonToManifestRelPath(const String &reasonPath)
+{
+  String path = storagePath(reasonPath);
+  int optionSep = path.indexOf('|');
+  if (optionSep >= 0) path = path.substring(0, optionSep);
+  path.replace("\\", "/");
+  if (path.startsWith("/banners/")) return path.substring(9);
+  if (path.startsWith("banners/")) return path.substring(8);
+  if (path.startsWith("/")) return path.substring(1);
+  return path;
+}
+
+bool promoteMissingPathToPriorityQueue(const String &reasonPath)
+{
+  String relPath = missingReasonToManifestRelPath(reasonPath);
+  if (relPath.length() == 0) return false;
+  String hash;
+  size_t size = 0;
+  if (!findPendingManifestEntry(relPath, hash, size))
+  {
+    write("Missing active file not in pending manifest; cannot promote: ");
+    writeln(relPath);
+    return false;
+  }
+  if (liveFileMatchesPendingManifest(relPath)) return true;
+  if (appendQueueList("p", relPath))
+  {
+    updateStatusText = "missing file promoted to priority";
+    write("Missing active file promoted to priority queue: ");
+    writeln(relPath);
+    return true;
+  }
+  writeln("Missing active file priority promotion failed");
+  return false;
+}
+
+bool invalidateLocalContentSum(const String &reasonPath)
+{
+  if (WiFi.status() != WL_CONNECTED || updateSourceCount == 0)
+  {
+    writeln("Content resync not forced: network/update source unavailable");
+    return false;
+  }
+
+  bool mounted = SD.begin(SD_CS_PIN);
+  sdOk = mounted;
+  if (!mounted)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    writeln("Content resync not forced: SD mount failed");
+    return false;
+  }
+
+  bool updateInProgress = SD.exists(REMOTE_MANIFEST_TMP) || SD.exists(REMOTE_SUM_TMP) ||
+                          SD.exists(DIFF_QUEUE_LIST) || queueHasFiles("p") || queueHasFiles("b") ||
+                          backgroundDownloadsPending() || cleanupDeletesPending();
+  if (updateInProgress)
+  {
+    bool promoted = promoteMissingPathToPriorityQueue(reasonPath);
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    if (!promoted) updateStatusText = "missing file; update active";
+    write("Content resync deferred; update queues/pending manifest active; missing path=");
+    writeln(displayPath(reasonPath));
+    return promoted;
+  }
+
+  static unsigned long lastInvalidateMs = 0;
+  unsigned long now = millis();
+  if (lastInvalidateMs != 0 && now - lastInvalidateMs < 30000UL)
+  {
+    digitalWrite(TOUCH_CS_PIN, HIGH);
+    return true;
+  }
+  lastInvalidateMs = now;
+
+  bool sumRemoved = !SD.exists("/banners/sum.txt") || SD.remove("/banners/sum.txt");
+  bool manifestRemoved = !SD.exists("/banners/manifest.txt") || SD.remove("/banners/manifest.txt");
+  SD.remove(REMOTE_MANIFEST_TMP);
+  SD.remove(REMOTE_SUM_TMP);
+  SD.remove(DIFF_QUEUE_LIST);
+  SD.remove(PRIORITY_QUEUE_LIST);
+  SD.remove(BACKGROUND_QUEUE_LIST);
+  digitalWrite(TOUCH_CS_PIN, HIGH);
+  if (sumRemoved && manifestRemoved)
+  {
+    lastRemoteSum = "";
+    lastRemoteManifestBody = "";
+    clearBackgroundDownloads();
+    clearCleanupDeletes();
+    manifestEntryCount = 0;
+    updateStatusText = "missing file; full resync pending";
+    write("Content full resync forced by missing playlist file; removed manifest/sum; path=");
+    writeln(displayPath(reasonPath));
+    lastCallHomeMs = 0;
+  }
+  else
+  {
+    writeln("Content resync force failed: could not remove manifest/sum cleanly");
+  }
+  return sumRemoved && manifestRemoved;
 }
 
 bool resetLocalContentState()

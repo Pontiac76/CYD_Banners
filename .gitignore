@@ -27,3 +27,7 @@ USER.md
 last-error.txt
 **/*.meta.json
 **/*.cyd
+server/content/_generated
+server/state/*
+server/firmware/firmware.bin
+server/firmware/latest.json

@@ -1,0 +1,106 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CYD Banners</title>
+<style>
+body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#fff;color:#111}
+a{color:#0645ad}code,pre{background:#f2f2f2;padding:.1rem .25rem;border-radius:.2rem}
+pre{padding:1rem;overflow:auto;max-height:22rem;white-space:pre-wrap}
+table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.35rem .6rem}th{background:#eee}
+.panel{border:1px solid #ccc;border-radius:.35rem;padding:1rem;margin:1rem 0}
+.warn{color:#b00020}.info{color:#666}
+.bar{background:#e0e0e0;height:1.2rem;border-radius:.2rem;overflow:hidden;position:relative}
+.bar-fill{height:100%;background:#4a8aff;border-radius:.2rem}
+.bar-text{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:.75rem}
+.tabs{display:flex;gap:.25rem;padding:1rem 2rem;background:#f8f8f8;border-bottom:1px solid #ccc}
+.tab{padding:.5rem 1rem;cursor:pointer;border:1px solid #ccc;border-bottom:none;border-radius:.35rem .35rem 0 0}
+.tab.active{background:#fff;font-weight:bold}
+.tab-content{display:none;padding:1rem 2rem}
+.tab-content.active{display:block}
+textarea{min-width:18rem}
+@media (prefers-color-scheme: dark){
+  body{background:#111;color:#ddd}
+  a{color:#8ab4f8}
+  code,pre{background:#222;color:#eee}
+  td,th{border-color:#444}
+  th{background:#222}
+  .panel{border-color:#444}
+  .warn{color:#ff8080}.info{color:#aaa}
+  .tabs{background:#1a1a1a;border-color:#444}
+  .tab{border-color:#444}
+  .tab.active{background:#222}
+  .bar{background:#333}
+}
+</style>
+</head><body>
+<div class="tabs">
+<div class="tab active" onclick="showTab('dashboard')">Dashboard</div>
+<div class="tab" onclick="showTab('content')">Content</div>
+<div class="tab" onclick="showTab('devices')">Devices</div>
+<div class="tab" onclick="showTab('diagnostics')">Diagnostics</div>
+<div class="tab" onclick="showTab('settings')">Settings</div>
+</div>
+
+<div id="tab-dashboard" class="tab-content active">
+<h2>Dashboard</h2>
+<p>Base path: <code>%%BASE_PATH%%</code> &nbsp; Content: <code>%%CONTENT_DIR%%</code><br>
+Last sum: <code>%%SUM_TEXT%%</code></p>
+<div class="panel">
+<h3>Content status</h3>
+<h4 class="warn">Warnings (%%WARNING_COUNT%%)</h4>
+<ul>%%WARNING_ITEMS%%</ul>
+<details><summary>Info / unreferenced directories (%%INFO_COUNT%%)</summary><ul class="info">%%INFO_ITEMS%%</ul></details>
+<details><summary>Parsed playlists (%%PLAYLIST_COUNT%%)</summary><ul>%%PLAYLIST_ITEMS%%</ul></details>
+</div>
+<form id="regen-form" method="post" action="/admin/regenerate" style="margin:1rem 0">
+<fieldset style="display:inline-block;padding:1rem">
+<legend>Regenerate all content</legend>
+<label><input name="force_images" type="checkbox" value="1"> Force image regeneration</label><br>
+<label><input name="auto_contrast" type="checkbox" value="1"%%AUTO_CONTRAST_CHECKED%%> Auto contrast</label><br>
+<label><input name="dither" type="checkbox" value="1"%%DITHER_CHECKED%%> Dither RGB565</label><br><br>
+<label style="display:block;margin:.15rem 0">Brightness <input name="brightness" type="number" step="0.05" value="%%BRIGHTNESS%%" style="width:5rem"></label>
+<label style="display:block;margin:.15rem 0">Contrast <input name="contrast" type="number" step="0.05" value="%%CONTRAST%%" style="width:5rem"></label>
+<label style="display:block;margin:.15rem 0">Saturation <input name="saturation" type="number" step="0.05" value="%%SATURATION%%" style="width:5rem"></label>
+<label style="display:block;margin:.15rem 0">Gamma <input name="gamma" type="number" step="0.05" value="%%GAMMA%%" style="width:5rem"></label>
+<button type="submit" style="margin-top:.4rem">Regenerate</button>
+</fieldset>
+</form>
+</div>
+
+<div id="tab-content" class="tab-content">
+<h2>Content Directories</h2>
+<div id="content-list"><p>Loading...</p></div>
+</div>
+
+<div id="tab-devices" class="tab-content">
+<h2>Devices</h2>
+<table id="device-table"><thead><tr><th>Name</th><th>Last Seen</th><th>Calls</th><th>Status</th><th>SD Size</th><th>Playlist</th><th>Used</th></tr></thead><tbody id="device-body"></tbody></table>
+</div>
+
+<div id="tab-diagnostics" class="tab-content">
+<h2>Diagnostics</h2>
+<div class="panel">
+<h3>Content Size</h3>
+<div id="size-chart"><p>Loading...</p></div>
+</div>
+<details><summary><strong>manifest.txt</strong></summary>
+<pre>%%MANIFEST_TEXT%%</pre>
+</details>
+</div>
+
+<div id="tab-settings" class="tab-content">
+<h2>Settings</h2>
+<form method="post" action="%%BASE_PATH%%/api/config" style="margin:1rem 0;padding:1rem;border:1px solid #ccc;border-radius:.35rem">
+<h3>Server Configuration</h3>
+<label>Host <input name="host" value="%%HOST%%" style="width:10rem"></label><br>
+<label>Port <input name="port" value="%%PORT%%" style="width:5rem"></label><br>
+<label>Base path <input name="base_path" value="%%BASE_PATH%%" style="width:10rem"></label><br>
+<label>Token <input name="token" value="%%TOKEN%%" style="width:20rem"></label><br>
+<label><input name="shutdown_enabled" type="checkbox" value="1" %%SHUTDOWN_CHECKED%%> Allow shutdown from admin</label><br>
+<button type="submit">Save</button>
+</form>
+<form method="post" action="/admin/reset-heartbeats" style="margin:1rem 0" onsubmit="return confirm('Clear CYD heartbeat list?')">
+<button type="submit">Reset heartbeat list</button>
+</form>
+%%SHUTDOWN_FORM%%
+</div>
+<script src="%%BASE_PATH%%/static/admin.js?v=4"></script>
+</body></html>

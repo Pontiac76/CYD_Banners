@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include "network_manager.h"
 
 TFT_eSPI tft;
 SPIClass touchSpi(HSPI);
@@ -149,10 +150,21 @@ void noteMissingFile(const String &path)
 {
   write("Missing file: ");
   writeln(displayPath(path));
+  bool newlyMissing = true;
   for (int i = 0; i < missingFileCount; ++i)
   {
-    if (missingFiles[i] == path) return;
+    if (missingFiles[i] == path)
+    {
+      newlyMissing = false;
+      break;
+    }
   }
+  String shown = displayPath(path);
+  if (shown.startsWith("SD://banners/"))
+  {
+    invalidateLocalContentSum(path);
+  }
+  if (!newlyMissing) return;
   if (missingFileCount >= MAX_MISSING_FILES)
   {
     for (int i = 0; i < MAX_MISSING_FILES - 1; ++i) missingFiles[i] = missingFiles[i + 1];

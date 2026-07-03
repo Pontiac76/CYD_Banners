@@ -4,109 +4,152 @@
 #include "display_manager.h"
 #include "network_manager.h"
 
-void handleTouch()
+namespace
 {
-  constexpr unsigned long TOUCH_IGNORE_AFTER_BOOT_MS = 1000;
-  constexpr unsigned long TOUCH_LOCKOUT_AFTER_TOGGLE_MS = 500;
-  constexpr unsigned long INFO_SCREEN_MIN_VISIBLE_MS = 1500;
-  constexpr unsigned long TOUCH_MIN_PRESS_MS = 40;
-  constexpr unsigned long TOUCH_MAX_PRESS_MS = 5000;
-  constexpr unsigned long TOUCH_RESET_PRESS_MS = 8000;
+constexpr unsigned long TOUCH_IGNORE_AFTER_BOOT_MS = 1000;
+constexpr unsigned long INFO_SCREEN_TIMEOUT_MS_LOCAL = INFO_SCREEN_TIMEOUT_MS;
+constexpr unsigned long INFO_BAR_REDRAW_MS = 50;
+constexpr unsigned long TOUCH_RESET_PRESS_MS = 8000;
+constexpr uint16_t INFO_MODE_BAR_COLOR = TFT_CYAN;
 
-  static bool pressCandidate = false;
-  static unsigned long pressStartedMs = 0;
-  static unsigned long lastToggleMs = 0;
-  static TS_Point lastPoint;
+bool touchCurrentlyDown()
+{
+  return touch.tirqTouched() && touch.touched();
+}
 
-  bool touchDown = touch.tirqTouched() && touch.touched();
-  unsigned long nowMs = millis();
-
-  if (nowMs < TOUCH_IGNORE_AFTER_BOOT_MS)
+void waitForTouchRelease()
+{
+  while (touchCurrentlyDown())
   {
-    touchWasDown = touchDown;
-    pressCandidate = false;
-    return;
+    delay(25);
+    yield();
   }
+  touchWasDown = false;
+}
 
-  if (touchDown)
+void drawInfoTimeoutBar(unsigned long nowMs, unsigned long enteredMs, unsigned long waitUntilMs)
+{
+  static int lastWidth = -1;
+  static unsigned long lastDrawMs = 0;
+
+  if (long(nowMs - lastDrawMs) < 0 && lastDrawMs != 0) return;
+  if (lastDrawMs != 0 && nowMs - lastDrawMs < INFO_BAR_REDRAW_MS) return;
+  lastDrawMs = nowMs;
+
+  unsigned long totalMs = waitUntilMs - enteredMs;
+  unsigned long remainingMs = long(waitUntilMs - nowMs) > 0 ? waitUntilMs - nowMs : 0;
+  int width = totalMs > 0 ? (int)((uint64_t)tft.width() * remainingMs / totalMs) : 0;
+  if (width < 0) width = 0;
+  if (width > tft.width()) width = tft.width();
+  if (width == lastWidth) return;
+  lastWidth = width;
+
+  constexpr int barHeight = 4;
+  int y = tft.height() - barHeight;
+  tft.fillRect(0, y, tft.width(), barHeight, TFT_DARKGREY);
+  if (width > 0) tft.fillRect(0, y, width, barHeight, INFO_MODE_BAR_COLOR);
+}
+
+void resetInfoTimeoutBarState()
+{
+  // Force the next modal info bar draw to repaint by drawing a harmless full-width
+  // background through the normal dynamic-state reset path.
+  lastBarWidth = -1;
+}
+
+void showInfoScreenModal()
+{
+  infoScreenVisible = true;
+  infoScreenEnteredMs = millis();
+  drawInfoScreen();
+  resetInfoTimeoutBarState();
+
+  unsigned long enteredMs = millis();
+  unsigned long waitUntilMs = enteredMs + INFO_SCREEN_TIMEOUT_MS_LOCAL;
+  unsigned long nextInfoRefreshMs = enteredMs + 1000UL;
+
+  writeln("Info screen active: waiting for timeout or touch release");
+
+  while (long(waitUntilMs - millis()) > 0)
   {
-    if (!touchWasDown && nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
+    unsigned long nowMs = millis();
+    drawInfoTimeoutBar(nowMs, enteredMs, waitUntilMs);
+
+    if (long(nowMs - nextInfoRefreshMs) >= 0)
     {
-      pressCandidate = true;
-      pressStartedMs = nowMs;
+      updateInfoCountdown();
+      nextInfoRefreshMs = nowMs + 1000UL;
     }
 
-    if (pressCandidate)
+    if (!touchCurrentlyDown())
     {
-      lastPoint = touch.getPoint();
-      if (infoScreenVisible && nowMs - pressStartedMs >= TOUCH_RESET_PRESS_MS && nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
+      delay(25);
+      yield();
+      continue;
+    }
+
+    unsigned long pressStartedMs = millis();
+    bool resetDone = false;
+    writeln("Info screen touched: waiting for release or long-hold reset");
+    while (touchCurrentlyDown() && long(waitUntilMs - millis()) > 0)
+    {
+      nowMs = millis();
+      drawInfoTimeoutBar(nowMs, enteredMs, waitUntilMs);
+      if (!resetDone && nowMs - pressStartedMs >= TOUCH_RESET_PRESS_MS)
       {
-        pressCandidate = false;
-        touchWasDown = true;
-        lastToggleMs = nowMs;
+        resetDone = true;
         writeln("Touch long hold on info screen: reset local content state");
         drawWorkNotice("Reset in progress", "clearing local manifest/sum");
         resetLocalContentState();
         infoScreenVisible = true;
-        infoScreenEnteredMs = nowMs;
+        infoScreenEnteredMs = millis();
+        drawInfoScreen();
+        resetInfoTimeoutBarState();
       }
+      delay(25);
+      yield();
     }
 
-    touchWasDown = true;
+    if (resetDone)
+    {
+      waitForTouchRelease();
+      writeln("Info screen reset complete; continuing info timeout");
+      continue;
+    }
+
+    if (long(waitUntilMs - millis()) > 0)
+    {
+      writeln("Info screen touch released: resuming normal operation");
+      break;
+    }
+  }
+
+  if (long(waitUntilMs - millis()) <= 0) writeln("Info screen timeout: resuming normal operation");
+
+  infoScreenVisible = false;
+  touchWasDown = false;
+  slideStartedMs = millis();
+  renderCurrentSlide();
+}
+} // namespace
+
+void handleTouch()
+{
+  unsigned long nowMs = millis();
+  if (nowMs < TOUCH_IGNORE_AFTER_BOOT_MS)
+  {
+    touchWasDown = touchCurrentlyDown();
     return;
   }
 
-  // Trigger on release, not press. This avoids immediate bounce/noise toggles
-  // while the finger is still down.
-  if (touchWasDown && pressCandidate)
+  if (!touchCurrentlyDown())
   {
-    unsigned long pressDurationMs = nowMs - pressStartedMs;
-    pressCandidate = false;
-
-    if (infoScreenVisible && pressDurationMs >= TOUCH_RESET_PRESS_MS && nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
-    {
-      // Long-hold reset normally fires while the touch is still down. Keep this
-      // release path as a fallback in case the touch controller misses samples.
-      lastToggleMs = nowMs;
-      writeln("Touch long release on info screen: reset local content state");
-      drawWorkNotice("Reset in progress", "clearing local manifest/sum");
-      resetLocalContentState();
-      infoScreenVisible = true;
-      infoScreenEnteredMs = nowMs;
-    }
-    else if (pressDurationMs >= TOUCH_MIN_PRESS_MS &&
-        pressDurationMs <= TOUCH_MAX_PRESS_MS &&
-        nowMs - lastToggleMs >= TOUCH_LOCKOUT_AFTER_TOGGLE_MS)
-    {
-      lastToggleMs = nowMs;
-      write("Touch release toggle: z=");
-      write(lastPoint.z);
-      write(" x=");
-      write(lastPoint.x);
-      write(" y=");
-      writeln(lastPoint.y);
-
-      if (infoScreenVisible)
-      {
-        if (nowMs - infoScreenEnteredMs < INFO_SCREEN_MIN_VISIBLE_MS)
-        {
-          writeln("Touch info close ignored: debounce/min-visible window");
-        }
-        else
-        {
-          infoScreenVisible = false;
-          slideStartedMs = nowMs;
-          renderCurrentSlide();
-        }
-      }
-      else
-      {
-        infoScreenVisible = true;
-        infoScreenEnteredMs = nowMs;
-        drawInfoScreen();
-      }
-    }
+    touchWasDown = false;
+    return;
   }
 
-  touchWasDown = false;
+  writeln("Screen touched: waiting for release");
+  waitForTouchRelease();
+  writeln("Screen released: showing info screen");
+  showInfoScreenModal();
 }

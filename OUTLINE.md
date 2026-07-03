@@ -1,5 +1,18 @@
 # CYD Banners — Project Outline
 
+## Helper sites:
+### ESP Connect 
+URL: https://thelastoutpostworkshop.github.io/ESPConnect/
+Allows to obtain information about the ESP32 via Chrome via a serial connection
+
+### ESP32 Parition Builder
+URL: https://thelastoutpostworkshop.github.io/ESP32PartitionBuilder/
+Create the CSV for the partition style wanted for the Flash file system
+
+### ESP32 Simulator
+URL: https://wokwi.com/
+Emulate common ESP32/Arduino/STM/Pico devices.
+
 ## Purpose
 
 CYD Banners turns Cheap Yellow Display devices into small information/banner signs for retro LAN shows.

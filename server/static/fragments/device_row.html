@@ -1,0 +1,17 @@
+<tr valign=top>
+  <td><input value="%%ALIAS%%" placeholder="alias" onchange="updateDevice('%%MAC_JS%%','alias',this.value)"><br>%%MAC%% - %%LAST_IP%%</td>
+  <td>%%LAST_SEEN%%</td>
+  <td>%%CALL_COUNT%%</td>
+  <td>%%UPDATE_STATUS%%</td>
+  <td><select onchange="updateDevice('%%MAC_JS%%','sd_size_gb',this.value)">%%SD_OPTIONS%%</select></td>
+  <td><textarea rows="3" cols="60" placeholder="one playlist/path per line" onchange="updateDevice('%%MAC_JS%%','playlist',this.value)">%%PLAYLIST%%</textarea></td>
+  <td>
+    <div style="margin:.3rem 0">
+      <small>%%CONTENT_SIZE%% / %%SD_SIZE_LABEL%% (%%USED_PCT%%%)</small>
+      <div class="bar" style="height:.8rem">
+        <div class="bar-fill" style="width:%%USED_PCT_RAW%%%;background:%%BAR_COLOR%%"></div>
+        <div class="bar-text">%%USED_PCT%%%</div>
+      </div>
+    </div>
+  </td>
+</tr>

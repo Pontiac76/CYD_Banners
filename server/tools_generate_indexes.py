@@ -37,7 +37,15 @@ def generate_indexes(content_dir: Path = DEFAULT_CONTENT_DIR) -> tuple[Path, Pat
     lines = ["ROOT playlist.ini", "HASH md5"]
     for path in iter_content_files(content_dir):
         rel = path.relative_to(content_dir).as_posix()
-        lines.append(f"FILE {file_hash(path)} {path.stat().st_size} {rel}")
+        try:
+            size = path.stat().st_size
+            digest = file_hash(path)
+        except FileNotFoundError:
+            # A generated file was replaced while this manifest walk was in progress.
+            # The caller normally serializes content refreshes, but tolerate external
+            # changes instead of returning HTTP 500 to devices.
+            continue
+        lines.append(f"FILE {digest} {size} {rel}")
 
     manifest = "\n".join(lines) + "\n"
     manifest_path = content_dir / "manifest.txt"

@@ -1,0 +1,3 @@
+#pragma once
+
+#define CYD_FIRMWARE_VERSION "20260630031510"

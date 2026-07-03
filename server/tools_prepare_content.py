@@ -6,6 +6,7 @@ from pathlib import Path
 from tools_convert_images import convert_all
 from tools_generate_gamelists import generate_gamelists
 from tools_generate_indexes import generate_indexes
+from tools_generate_playlist_chunks import generate_playlist_chunks
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTENT_DIR = ROOT / "server" / "content"
@@ -35,7 +36,9 @@ def prepare_content(
         saturation=saturation,
         gamma=gamma,
         dither=dither,
+        settings_sensitive=force_images,
     )
+    generate_playlist_chunks(content_dir)
     _manifest_path, _sum_path, content_sum = generate_indexes(content_dir)
     return converted, content_sum
 
