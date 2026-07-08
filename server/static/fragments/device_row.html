@@ -2,7 +2,7 @@
   <td><input value="%%ALIAS%%" placeholder="alias" onchange="updateDevice('%%MAC_JS%%','alias',this.value)"><br>%%MAC%% - %%LAST_IP%%</td>
   <td>%%LAST_SEEN%%</td>
   <td>%%CALL_COUNT%%</td>
-  <td>%%UPDATE_STATUS%%</td>
+  <td>%%UPDATE_STATUS%%<hr><button type="button" onclick="showDevicePlaylist('%%MAC_JS%%')">Show playlist</button></td>
   <td><select onchange="updateDevice('%%MAC_JS%%','sd_size_gb',this.value)">%%SD_OPTIONS%%</select></td>
   <td><textarea rows="3" cols="60" placeholder="one playlist/path per line" onchange="updateDevice('%%MAC_JS%%','playlist',this.value)">%%PLAYLIST%%</textarea></td>
   <td>

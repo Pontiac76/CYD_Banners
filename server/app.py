@@ -882,6 +882,22 @@ def api_size() -> Response:
     return Response(json.dumps({"total": total, "by_dir": by_dir}), mimetype="application/json")
 
 
+@app.get(f"{BASE_PATH}/api/device_playlist")
+def api_device_playlist() -> Response:
+    mac = request.args.get("mac", "")
+    normalized = normalize_mac(mac)
+    if not normalized:
+        return Response(json.dumps({"error": "invalid mac"}), mimetype="application/json", status=400)
+    try:
+        with CONTENT_REFRESH_LOCK:
+            refresh_indexes_without_image_conversion()
+            from tools_generate_playlist_chunks import expanded_playlist_for_mac
+            lines = expanded_playlist_for_mac(CONTENT_DIR, normalized)
+    except Exception as exc:
+        return Response(json.dumps({"error": str(exc)}), mimetype="application/json", status=500)
+    return Response(json.dumps({"mac": normalized, "count": len(lines), "playlist": lines}), mimetype="application/json")
+
+
 @app.get(f"{BASE_PATH}/api/device_size")
 def api_device_size() -> Response:
     mac = request.args.get("mac", "")

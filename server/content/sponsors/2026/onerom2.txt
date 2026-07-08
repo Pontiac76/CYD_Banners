@@ -1,0 +1,11 @@
+1:OneROM
+2:TO RULE THEM ALL
+One hardware design can replace many
+ROM types with the same pin count.
+ROM type, size, pin behavior, and chip
+select behavior are configurable.
+
+Tested systems include Commodore 64,
+VIC-20, PET, 1541 drives, Atari 800XL,
+TI-99, CoCo2, BBC Micro and Master,
+PC XT, Amiga, and arcade systems.

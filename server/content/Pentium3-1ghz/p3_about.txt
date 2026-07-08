@@ -1,0 +1,8 @@
+1:Pentium 3
+2:Running Windows 98SE
+LD:CPU: Pentum 3 - 1 GHz
+LD:Memory: 1024meg DDR
+LD:HDD1:32Gig IDE SD
+LD:HHD2:128Gig SATA SSD
+LD:CDRom:52x16x52 LiteScribe DVD Burner
+LD:Network:100MBit AcerLAN ALN-320

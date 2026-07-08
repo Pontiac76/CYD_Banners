@@ -1,10 +1,8 @@
-Half-Life|halflife|1:Half-Life
-Quake3Arena|q3a|1:Quake III Arena
-UnrealTournament|ut99|1:Unreal Tournament
-Diablo2|diablo2|1:Diablo II
-StarCraft|starcraft|1:StarCraft
-AgeOfEmpires2|aoe2|1:Age of Empires II
-DeusEx|deusex|1:Deus Ex
-NeedForSpeedPorsche|nfspu|1:Need for Speed\n2:Porsche Unleashed
-TheSims|sims|1:The Sims
-Homeworld|homeworld|1:Homeworld
+Descent|descent|1:Descent
+Descent2|descent2|1:Descent
+NeedForSpeed2|nfs2|1:Need For Speed 2\n2:Special Edition
+NeedForSpeed3|nfs3|1:Need For Speed 3
+FreeCell|freecell|1:Free Cell
+Doom|doom|1:Doom\n2:The original
+Doom2|doom2|1:Doom 2
+UnRealTournament|urtgoty|1:Unreal Tournament\n2:Game of the Year '99

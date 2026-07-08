@@ -1,0 +1,9 @@
+1:Doom
+2:The Ultimate Doom
+LD:Year:1993
+LD:Platform:DOS
+LD:Genre:First-Person Shooter
+LD:Theme:Sci-Fi, Horror, Demons
+LD:Publisher:id Software
+LD:Developer:id Software
+LD:Mode:Single / Multiplayer

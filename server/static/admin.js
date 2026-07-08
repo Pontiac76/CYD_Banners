@@ -98,6 +98,24 @@ async function updateDevice(mac, field, value) {
   if (resp.ok) loadDevices();
 }
 
+async function showDevicePlaylist(mac) {
+  var panel = document.getElementById('device-playlist-panel');
+  var title = document.getElementById('device-playlist-title');
+  var out = document.getElementById('device-playlist-output');
+  panel.style.display = 'block';
+  title.textContent = 'Rendered playlist for ' + mac;
+  out.textContent = 'Loading...';
+  try {
+    var r = await fetch('/cyd-banners/api/device_playlist?mac=' + encodeURIComponent(mac));
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    title.textContent = 'Rendered playlist for ' + data.mac + ' (' + data.count + ' items)';
+    out.textContent = data.playlist.join('\n') || '(empty playlist)';
+  } catch(e) {
+    out.textContent = 'Error loading rendered playlist: ' + String(e);
+  }
+}
+
 function last_seen_age_text(value) {
   if (!value || value === 'unknown') return value || 'never';
   try {

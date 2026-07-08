@@ -1,0 +1,9 @@
+1:Doom II
+2:Hell on Earth
+LD:Year:1994
+LD:Platform:DOS
+LD:Genre:First-Person Shooter
+LD:Theme:Demonic Invasion, Earth
+LD:Publisher:GT Interactive
+LD:Developer:id Software
+LD:Mode:Single / Multiplayer

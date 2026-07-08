@@ -1,0 +1,7 @@
+1:OneROM
+2:TO RULE THEM ALL
+Because the hardware and software are
+open source and inexpensive to build,
+OneROM is useful for repair, testing,
+development, and keeping vintage
+machines running.

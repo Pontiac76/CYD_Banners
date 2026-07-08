@@ -1,0 +1,11 @@
+1:OneROM
+2:TO RULE THEM ALL
+OneROM is an open-source ROM
+replacement for retro computers.
+It uses a very low-cost microcontroller
+and can emulate many classic ROM chips.
+
+It supports 24, 28, 32, and 40 pin
+EPROMs and mask-programmed ROMs used
+in many computer-based systems from
+the late 1970s through early 1990s.

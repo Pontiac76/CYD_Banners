@@ -1,0 +1,9 @@
+1:Need for Speed III
+2:Hot Pursuit
+LD:Year:1998
+LD:Platform:Windows
+LD:Genre:Racing
+LD:Theme:Sports Cars, Police Chases
+LD:Publisher:Electronic Arts
+LD:Developer:EA Canada / EA Seattle
+LD:Mode:Single / Multiplayer

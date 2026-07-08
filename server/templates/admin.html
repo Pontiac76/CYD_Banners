@@ -15,6 +15,9 @@ table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.35rem .6rem}
 .tab.active{background:#fff;font-weight:bold}
 .tab-content{display:none;padding:1rem 2rem}
 .tab-content.active{display:block}
+input,textarea,select,button{font:inherit;color:#111;background:#fff;border:1px solid #999;border-radius:.2rem;padding:.2rem .35rem}
+button{cursor:pointer;background:#f3f3f3}
+button:hover{background:#e8e8e8}
 textarea{min-width:18rem}
 @media (prefers-color-scheme: dark){
   body{background:#111;color:#ddd}
@@ -28,6 +31,10 @@ textarea{min-width:18rem}
   .tab{border-color:#444}
   .tab.active{background:#222}
   .bar{background:#333}
+  input,textarea,select,button{color:#ddd;background:#1d1d1d;border-color:#555;color-scheme:dark}
+  button{background:#2a2a2a}
+  button:hover{background:#333}
+  input::placeholder,textarea::placeholder{color:#888}
 }
 </style>
 </head><body>
@@ -73,6 +80,10 @@ Last sum: <code>%%SUM_TEXT%%</code></p>
 <div id="tab-devices" class="tab-content">
 <h2>Devices</h2>
 <table id="device-table"><thead><tr><th>Name</th><th>Last Seen</th><th>Calls</th><th>Status</th><th>SD Size</th><th>Playlist</th><th>Used</th></tr></thead><tbody id="device-body"></tbody></table>
+<div id="device-playlist-panel" class="panel" style="display:none">
+<h3 id="device-playlist-title">Rendered playlist</h3>
+<pre id="device-playlist-output"></pre>
+</div>
 </div>
 
 <div id="tab-diagnostics" class="tab-content">
@@ -102,5 +113,5 @@ Last sum: <code>%%SUM_TEXT%%</code></p>
 </form>
 %%SHUTDOWN_FORM%%
 </div>
-<script src="%%BASE_PATH%%/static/admin.js?v=4"></script>
+<script src="%%BASE_PATH%%/static/admin.js?v=5"></script>
 </body></html>

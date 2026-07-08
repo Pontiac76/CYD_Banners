@@ -1,0 +1,9 @@
+1:FreeCell
+LD:Year:1995
+LD:Platform:Windows
+LD:Genre:Card Game
+LD:Theme:Solitaire, Strategy
+LD:Publisher:Microsoft
+LD:Developer:Microsoft
+LD:Perspective:2D
+LD:Mode:Single Player

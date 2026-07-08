@@ -1,0 +1,9 @@
+1:Unreal Tournament
+2:Game of the Year
+LD:Year:1999
+LD:Platform:Windows
+LD:Genre:Arena FPS
+LD:Theme:Sci-Fi, Tournament Combat
+LD:Publisher:GT Interactive
+LD:Developer:Epic Games / Digital Extremes
+LD:Mode:Single / Multiplayer

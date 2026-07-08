@@ -26,6 +26,8 @@ unsigned long configFirmwareOtaCheckIntervalMs = 10UL * 60UL * 1000UL;
 unsigned long configWifiConnectWindowMs = 9000UL;
 unsigned long configWifiRetryIdleMs = 4000UL;
 
+void sendHeartbeatReport();
+
 namespace
 {
 unsigned long wifiAttemptStartedMs = 0;
@@ -52,6 +54,9 @@ void serviceUiDuringLongWork()
 
 namespace
 {
+
+void fetchManifest(const String &updateSource, const String &remoteSum);
+String readTextFileTrimmed(const char *path);
 
 void drawWorkNotice(const String &line1, const String &line2 = String(""))
 {
@@ -1251,6 +1256,7 @@ const char *REMOTE_SUM_TMP = "/banners/sum.txt.tmp";
 const char *DIFF_QUEUE_LIST = "/banners/_update/diff.list";
 const char *PRIORITY_QUEUE_LIST = "/banners/_update/p.list";
 const char *BACKGROUND_QUEUE_LIST = "/banners/_update/b.list";
+const char *PROMOTE_MARKER = "/banners/_update/promoted.sum";
 const char *ACCEPTED_MANIFEST_SCAN = "/banners/_verify/manifest.scan";
 const char *ACCEPTED_MANIFEST_SCAN_POS = "/banners/_verify/manifest.scan.pos";
 
@@ -1263,6 +1269,7 @@ void discardPendingUpdateState(const char *reason)
   SD.remove(DIFF_QUEUE_LIST);
   SD.remove(PRIORITY_QUEUE_LIST);
   SD.remove(BACKGROUND_QUEUE_LIST);
+  SD.remove(PROMOTE_MARKER);
 }
 
 const char *queueListPath(const char *queue)
@@ -1502,6 +1509,19 @@ int compareManifestPaths(const String &left, const String &right)
   return a < b ? -1 : 1;
 }
 
+bool appendDiffIfLiveFileDoesNotMatch(const String &relPath, size_t expectedSize, const String &expectedHash, int &diffCount)
+{
+  String livePath = String("/banners/") + relPath;
+  if (actualSdFileMatchesManifest(livePath, expectedSize, expectedHash))
+  {
+    write("Diff skipped; live file already matches pending manifest: ");
+    writeln(relPath);
+    return true;
+  }
+  if (appendQueueList("diff", relPath)) ++diffCount;
+  return true;
+}
+
 bool buildDiffQueueFromPendingManifest()
 {
   File remote = SD.open(REMOTE_MANIFEST_TMP, FILE_READ);
@@ -1525,6 +1545,8 @@ bool buildDiffQueueFromPendingManifest()
   if (emptyDiffList) emptyDiffList.close();
   int diffCount = 0;
   int remoteCount = 0;
+  updateStatusText = "planning update";
+  ::sendHeartbeatReport();
   unsigned long lastYieldMs = millis();
   while (haveRemote)
   {
@@ -1544,8 +1566,10 @@ bool buildDiffQueueFromPendingManifest()
     int cmp = haveLocal ? compareManifestPaths(localPath, remotePath) : 1;
     if (!haveLocal || cmp > 0)
     {
-      // Remote path is new/missing locally.
-      if (appendQueueList("diff", remotePath)) ++diffCount;
+      // Remote path is new/missing from the accepted local manifest. The live
+      // SD file may still already match because a previous update was interrupted
+      // before manifest acceptance, so verify before queuing unnecessary work.
+      appendDiffIfLiveFileDoesNotMatch(remotePath, remoteSize, remoteHash, diffCount);
       ++remoteCount;
       haveRemote = readNextManifestEntry(remote, remotePath, remoteHash, remoteSize);
     }
@@ -1558,7 +1582,7 @@ bool buildDiffQueueFromPendingManifest()
     {
       if (localSize != remoteSize || !localHash.equalsIgnoreCase(remoteHash))
       {
-        if (appendQueueList("diff", remotePath)) ++diffCount;
+        appendDiffIfLiveFileDoesNotMatch(remotePath, remoteSize, remoteHash, diffCount);
       }
       ++remoteCount;
       haveRemote = readNextManifestEntry(remote, remotePath, remoteHash, remoteSize);
@@ -1849,22 +1873,52 @@ void promoteBackgroundPriorityList()
   }
 }
 
+bool backgroundPromotionAlreadyDone()
+{
+  String pendingSum = readTextFileTrimmed(REMOTE_SUM_TMP);
+  if (pendingSum.length() == 0) return false;
+  return readTextFileTrimmed(PROMOTE_MARKER) == pendingSum;
+}
+
+void markBackgroundPromotionDone()
+{
+  String pendingSum = readTextFileTrimmed(REMOTE_SUM_TMP);
+  if (pendingSum.length() == 0) return;
+  ensureParentDirs(PROMOTE_MARKER);
+  File f = SD.open(PROMOTE_MARKER, FILE_WRITE);
+  if (!f) return;
+  f.println(pendingSum);
+  f.close();
+}
+
 void promoteBackgroundPriorityQueue()
 {
+  if (backgroundPromotionAlreadyDone()) return;
+  unsigned long startMs = millis();
   int promoted = 0;
   String bBase = String(UPDATE_ROOT) + "/b";
   promoteBackgroundPriorityRecursive(bBase, bBase, promoted);
   promoteBackgroundPriorityList();
+  markBackgroundPromotionDone();
   if (promoted > 0)
   {
     write("Promoted background staged files to priority: ");
     writeln(promoted);
+  }
+  unsigned long elapsedMs = millis() - startMs;
+  if (elapsedMs >= 1000UL)
+  {
+    write("Background priority promotion scan elapsed=");
+    write((elapsedMs + 500UL) / 1000UL);
+    writeln("s");
   }
 }
 
 void classifyDiffQueue()
 {
   unsigned long startMs = millis();
+  updateStatusText = "classifying update";
+  ::sendHeartbeatReport();
   SD.remove(PRIORITY_QUEUE_LIST);
   SD.remove(BACKGROUND_QUEUE_LIST);
   ensureParentDirs(PRIORITY_QUEUE_LIST);
@@ -2640,6 +2694,86 @@ void processAcceptedManifestScanStepImpl()
   }
 }
 
+bool fetchRemoteSum(const String &source, String &remoteSum, int &code)
+{
+  remoteSum = "";
+  code = 0;
+  HTTPClient http;
+  http.setConnectTimeout(1500);
+  http.setTimeout(1500);
+  String url = source + "/sum.txt?t=" + serviceToken + "&mac=" + macAddressText();
+  String logUrl = source + "/sum.txt?t=<redacted>&mac=" + macAddressText();
+  if (!http.begin(url))
+  {
+    write("Call-home GET ");
+    write(logUrl);
+    writeln(" -> begin failed");
+    return false;
+  }
+  code = http.GET();
+  if (code >= 200 && code < 300) remoteSum = trimBody(http.getString());
+  http.end();
+
+  write("Call-home GET ");
+  write(logUrl);
+  write(" -> HTTP ");
+  write(code);
+  if (remoteSum.length() > 0)
+  {
+    write(", sum ");
+    write(remoteSum);
+  }
+  writeln();
+  return code >= 200 && code < 300;
+}
+
+bool checkPendingUpdateSumChanged(const String &source)
+{
+  lastCallHomeMs = millis();
+  callHomeProblem = true;
+  loadPrivateConfig();
+  if (!serviceTokenPresent || source.length() == 0)
+  {
+    updateStatusText = !serviceTokenPresent ? "service token missing" : "no update source";
+    return false;
+  }
+
+  String remoteSum;
+  int code = 0;
+  if (!fetchRemoteSum(source, remoteSum, code))
+  {
+    updateStatusText = String("source failed HTTP ") + code;
+    return false;
+  }
+
+  callHomeProblem = false;
+  lastGoodUpdateSource = source;
+  lastRemoteSum = remoteSum;
+  if (remoteSum.length() == 0)
+  {
+    updateStatusText = "empty sum.txt";
+    return false;
+  }
+
+  String baseSum = readTextFileTrimmed(REMOTE_SUM_TMP);
+  if (baseSum.length() == 0) baseSum = readLocalSum();
+  if (baseSum == remoteSum)
+  {
+    updateStatusText = "pending update current";
+    writeln("Pending update sum unchanged; continuing existing queues");
+    return false;
+  }
+
+  write("Pending update sum changed: base ");
+  write(baseSum.length() > 0 ? baseSum : String("<missing>"));
+  write(" remote ");
+  writeln(remoteSum);
+  discardPendingUpdateState("remote sum changed while queues pending");
+  updateStatusText = "content changed; replanning";
+  fetchManifest(source, remoteSum);
+  return true;
+}
+
 void checkCallHome()
 {
   lastCallHomeMs = millis();
@@ -2660,35 +2794,9 @@ void checkCallHome()
 
   for (int i = 0; i < updateSourceCount; ++i)
   {
-    HTTPClient http;
-    http.setConnectTimeout(1500);
-    http.setTimeout(1500);
-    String url = updateSources[i] + "/sum.txt?t=" + serviceToken + "&mac=" + macAddressText();
-    String logUrl = updateSources[i] + "/sum.txt?t=<redacted>&mac=" + macAddressText();
-    if (!http.begin(url))
-    {
-      write("Call-home GET ");
-      write(logUrl);
-      writeln(" -> begin failed");
-      continue;
-    }
-    int code = http.GET();
     String remoteSum;
-    if (code >= 200 && code < 300) remoteSum = trimBody(http.getString());
-    http.end();
-
-    write("Call-home GET ");
-    write(logUrl);
-    write(" -> HTTP ");
-    write(code);
-    if (remoteSum.length() > 0)
-    {
-      write(", sum ");
-      write(remoteSum);
-    }
-    writeln();
-
-    if (code >= 200 && code < 300)
+    int code = 0;
+    if (fetchRemoteSum(updateSources[i], remoteSum, code))
     {
       callHomeProblem = false;
       lastGoodUpdateSource = updateSources[i];
@@ -2813,6 +2921,28 @@ void networkUpdate()
       String source = lastGoodUpdateSource.length() > 0 ? lastGoodUpdateSource : (updateSourceCount > 0 ? updateSources[0] : String(""));
       if (source.length() > 0)
       {
+        if (configCallHomeIntervalMs > 0 && (lastCallHomeMs == 0 || now - lastCallHomeMs >= configCallHomeIntervalMs))
+        {
+          bool mounted = LittleFS.begin(false);
+          littlefsOk = mounted;
+          if (mounted)
+          {
+            writeln("");
+            writeln("Pending update sum check starting");
+            if (checkPendingUpdateSumChanged(source))
+            {
+              LittleFS.end();
+              return;
+            }
+            LittleFS.end();
+          }
+          else
+          {
+            callHomeProblem = true;
+            updateStatusText = "LittleFS mount failed";
+            writeln("Pending update sum check skipped: LittleFS mount failed");
+          }
+        }
         resumePendingUpdate(source);
         return;
       }

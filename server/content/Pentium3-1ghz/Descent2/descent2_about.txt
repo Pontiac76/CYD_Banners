@@ -1,0 +1,9 @@
+1:Descent II
+LD:Year:1996
+LD:Platform:DOS
+LD:Genre:Six-Degree FPS
+LD:Theme:Sci-Fi, Robots, Alien Mines
+LD:Publisher:Interplay
+LD:Developer:Parallax Software
+LD:Perspective:First-Person
+LD:Mode:Single / Multiplayer
